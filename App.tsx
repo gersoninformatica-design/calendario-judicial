@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -59,13 +60,21 @@ const App: React.FC = () => {
   const isAdmin = useMemo(() => checkIsAdmin(session?.user?.email), [session]);
 
   useEffect(() => {
+    // Detectar modo recuperación desde la URL
+    if (window.location.hash.includes('type=recovery')) {
+      setIsRecoveryMode(true);
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
       if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
       else {
         setProfile(null);
@@ -79,7 +88,6 @@ const App: React.FC = () => {
 
   const fetchOrCreateProfile = async (userId: string, email: string | undefined, fullName: string | undefined) => {
     try {
-      // 1. ¿Ya existe este usuario por ID real?
       let { data: profileData } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       
       if (profileData) {
@@ -87,12 +95,10 @@ const App: React.FC = () => {
         return;
       }
 
-      // 2. Si no existe por ID, ¿existe por EMAIL (fue una invitación de Gerson)?
       if (email) {
         const { data: inviteData } = await supabase.from('profiles').select('*').eq('email', email.toLowerCase().trim()).maybeSingle();
         
         if (inviteData) {
-          // Si existe por email pero tiene un ID diferente (el ID temporal de la invitación), lo actualizamos
           const { data: updatedProfile, error: updateError } = await supabase.from('profiles')
             .update({ id: userId, full_name: fullName || inviteData.full_name })
             .eq('email', email.toLowerCase().trim())
@@ -106,7 +112,6 @@ const App: React.FC = () => {
         }
       }
 
-      // 3. Si no existe de ninguna forma, crear nuevo
       const isUserGerson = checkIsAdmin(email);
       const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
         id: userId,
@@ -224,6 +229,9 @@ const App: React.FC = () => {
       <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Cargando TribunalSync...</p>
     </div>
   );
+
+  // SI HAY SESIÓN PERO ESTAMOS EN MODO RECUPERACIÓN, MOSTRAR AUTHMODAL PARA ACTUALIZAR CLAVE
+  if (isRecoveryMode) return <AuthModal />;
 
   if (!session) return <AuthModal />;
 
