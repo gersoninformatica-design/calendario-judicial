@@ -63,7 +63,7 @@ const App: React.FC = () => {
   // 2. REFS
   const broadcastChannel = useRef<any>(null);
 
-  // 3. EFECTOS (Hooks deben ser incondicionales)
+  // 3. EFECTOS
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -97,7 +97,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!session || !profile || !profile.is_approved) return;
+    // Si no hay perfil o es Gerson (bypass), permitir conexión en tiempo real
+    const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+    if (!session || !profile || (!profile.is_approved && !isAdmin)) return;
 
     const channel = supabase.channel('tribunal-realtime', {
       config: { presence: { key: session.user.id } },
@@ -140,7 +142,8 @@ const App: React.FC = () => {
   }, [session, profile]);
 
   useEffect(() => {
-    if (!session || (profile && !profile.is_approved)) {
+    const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+    if (!session || (profile && !profile.is_approved && !isAdmin)) {
       setIsLoaded(true);
       return;
     }
@@ -161,12 +164,11 @@ const App: React.FC = () => {
     fetchData();
   }, [session, profile]);
 
-  // 4. MEMOS (Hooks deben ser incondicionales)
+  // 4. MEMOS
   const filteredEvents = useMemo(() => {
     let base = events;
     if (activeUnitId) base = base.filter(e => e.unitId === activeUnitId);
     
-    // Filtro adicional por vista activa
     if (activeView === 'tasks') return base.filter(e => e.type === 'tarea');
     if (activeView === 'reminders') return base.filter(e => e.type === 'recordatorio');
     if (activeView === 'reunions') return base.filter(e => e.type === 'reunion');
@@ -213,7 +215,7 @@ const App: React.FC = () => {
     setIsModalOpen(false);
   };
 
-  // 6. RETORNOS CONDICIONALES (Después de todos los hooks)
+  // 6. RETORNOS CONDICIONALES
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
       <div className="relative"><Loader2 className="w-16 h-16 text-blue-500 animate-spin" /><ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /></div>
@@ -223,7 +225,9 @@ const App: React.FC = () => {
 
   if (!session) return <AuthModal />;
 
-  if (profile && !profile.is_approved) {
+  // BYPASS PARA GERSON: Si es su email, no mostrar la pantalla de bloqueo
+  const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+  if (profile && !profile.is_approved && !isAdmin) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-slate-200 max-w-lg animate-in zoom-in-95 duration-500">
