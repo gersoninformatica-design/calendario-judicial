@@ -8,8 +8,10 @@ export interface Unit {
 export interface UserProfile {
   id: string;
   full_name: string;
+  email?: string;
   role: string;
   avatar_url?: string;
+  is_approved: boolean; // Control de seguridad de Gerson
 }
 
 export interface TribunalEvent {
@@ -19,7 +21,7 @@ export interface TribunalEvent {
   startTime: Date;
   endTime: Date;
   unitId: string;
-  user_id?: string; // ID del creador
+  user_id?: string;
   type: 'audiencia' | 'reunion' | 'tarea' | 'recordatorio';
   status: 'pendiente' | 'completado' | 'cancelado';
 }

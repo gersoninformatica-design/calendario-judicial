@@ -8,7 +8,6 @@ import UnitSettingsModal from './components/UnitSettingsModal.tsx';
 import AuthModal from './components/AuthModal.tsx';
 import { TribunalEvent, Unit, UserProfile } from './types.ts';
 import { supabase } from './lib/supabase.ts';
-// Fix: Import missing 'format' function from date-fns
 import { format } from 'date-fns';
 import { 
   FileText, 
@@ -19,8 +18,13 @@ import {
   ShieldCheck, 
   Activity,
   History,
-  Bell,
-  Clock
+  Clock,
+  AlertTriangle,
+  CheckCircle,
+  Trash2,
+  Lock,
+  UserPlus,
+  ShieldAlert
 } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
@@ -28,12 +32,13 @@ import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
 interface ActivityItem {
   id: string;
   userName: string;
-  action: 'creó' | 'actualizó' | 'eliminó';
+  action: 'creó' | 'actualizó' | 'eliminó' | 'canceló';
   target: string;
   timestamp: Date;
 }
 
 const App: React.FC = () => {
+  // 1. DECLARACIÓN DE ESTADOS
   const [isLoaded, setIsLoaded] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -55,7 +60,10 @@ const App: React.FC = () => {
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // 1. MANEJO DE SESIÓN Y PERFIL
+  // 2. REFS
+  const broadcastChannel = useRef<any>(null);
+
+  // 3. EFECTOS (Hooks deben ser incondicionales)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -88,13 +96,14 @@ const App: React.FC = () => {
     }
   };
 
-  // 2. MANEJO DE PRESENCIA (Personal en Línea)
   useEffect(() => {
-    if (!session || !profile) return;
+    if (!session || !profile || !profile.is_approved) return;
 
-    const channel = supabase.channel('despacho-presencia', {
+    const channel = supabase.channel('tribunal-realtime', {
       config: { presence: { key: session.user.id } },
     });
+
+    broadcastChannel.current = channel;
 
     channel
       .on('presence', { event: 'sync' }, () => {
@@ -102,6 +111,20 @@ const App: React.FC = () => {
         const users = Object.values(newState).flat().map((p: any) => p);
         const uniqueUsers = Array.from(new Map(users.map(u => [u.id, u])).values());
         setOnlineUsers(uniqueUsers);
+      })
+      .on('broadcast', { event: 'user-action' }, ({ payload }) => {
+        setActivities(prev => [{ ...payload, timestamp: new Date(payload.timestamp) }, ...prev].slice(0, 15));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, async (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
+          setEvents(prev => [...prev.filter(e => e.id !== newE.id), newE]);
+        } else if (payload.eventType === 'UPDATE') {
+          const updE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
+          setEvents(prev => prev.map(e => e.id === updE.id ? updE : e));
+        } else if (payload.eventType === 'DELETE') {
+          setEvents(prev => prev.filter(e => e.id !== payload.old.id));
+        }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -116,9 +139,8 @@ const App: React.FC = () => {
     return () => { channel.unsubscribe(); };
   }, [session, profile]);
 
-  // 3. CARGA DE DATOS Y FEED DE ACTIVIDAD
   useEffect(() => {
-    if (!session) {
+    if (!session || (profile && !profile.is_approved)) {
       setIsLoaded(true);
       return;
     }
@@ -127,13 +149,8 @@ const App: React.FC = () => {
       try {
         const { data: unitsData } = await supabase.from('units').select('*').order('name');
         const { data: eventsData } = await supabase.from('events').select('*').order('startTime');
-
         setUnits(unitsData || []);
-        setEvents((eventsData || []).map(e => ({
-          ...e,
-          startTime: new Date(e.startTime),
-          endTime: new Date(e.endTime)
-        })));
+        setEvents((eventsData || []).map(e => ({ ...e, startTime: new Date(e.startTime), endTime: new Date(e.endTime) })));
         setIsLoaded(true);
       } catch (err) {
         setIsOnline(false);
@@ -142,141 +159,126 @@ const App: React.FC = () => {
     };
 
     fetchData();
+  }, [session, profile]);
 
-    const channel = supabase.channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, async (payload) => {
-        let actionLabel: 'creó' | 'actualizó' | 'eliminó' = 'actualizó';
-        let targetTitle = '';
-        
-        if (payload.eventType === 'INSERT') {
-          actionLabel = 'creó';
-          targetTitle = payload.new.title;
-          const newE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
-          setEvents(prev => [...prev.filter(e => e.id !== newE.id), newE]);
-        } else if (payload.eventType === 'UPDATE') {
-          actionLabel = 'actualizó';
-          targetTitle = payload.new.title;
-          const updE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
-          setEvents(prev => prev.map(e => e.id === updE.id ? updE : e));
-        } else if (payload.eventType === 'DELETE') {
-          actionLabel = 'eliminó';
-          targetTitle = payload.old.title || 'Evento';
-          setEvents(prev => prev.filter(e => e.id !== payload.old.id));
-        }
-
-        // Agregar al feed de actividades localmente
-        const newActivity: ActivityItem = {
-          id: crypto.randomUUID(),
-          userName: 'Alguien', // En un sistema real, haríamos un join con perfiles
-          action: actionLabel,
-          target: targetTitle,
-          timestamp: new Date()
-        };
-        setActivities(prev => [newActivity, ...prev].slice(0, 10));
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, (payload) => {
-        if (payload.eventType === 'INSERT') setUnits(prev => [...prev, payload.new as Unit]);
-        if (payload.eventType === 'UPDATE') setUnits(prev => prev.map(u => u.id === payload.new.id ? payload.new as Unit : u));
-        if (payload.eventType === 'DELETE') setUnits(prev => prev.filter(u => u.id !== payload.old.id));
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [session]);
-
+  // 4. MEMOS (Hooks deben ser incondicionales)
   const filteredEvents = useMemo(() => {
     let base = events;
     if (activeUnitId) base = base.filter(e => e.unitId === activeUnitId);
+    
+    // Filtro adicional por vista activa
     if (activeView === 'tasks') return base.filter(e => e.type === 'tarea');
     if (activeView === 'reminders') return base.filter(e => e.type === 'recordatorio');
     if (activeView === 'reunions') return base.filter(e => e.type === 'reunion');
+    
     return base;
   }, [events, activeUnitId, activeView]);
 
   const eventsWithUnit = useMemo(() => {
-    return filteredEvents.map(e => ({
-      ...e,
-      unit: units.find(u => u.id === e.unitId)?.name || 'Desconocida'
+    return filteredEvents.map(e => ({ 
+      ...e, 
+      unit: units.find(u => u.id === e.unitId)?.name || 'Desconocida' 
     }));
   }, [filteredEvents, units]);
 
+  // 5. HANDLERS
+  const notifyAction = (action: ActivityItem['action'], target: string) => {
+    if (broadcastChannel.current && profile) {
+      const payload = { id: crypto.randomUUID(), userName: profile.full_name, action, target, timestamp: new Date() };
+      broadcastChannel.current.send({ type: 'broadcast', event: 'user-action', payload });
+      setActivities(prev => [payload, ...prev].slice(0, 15));
+    }
+  };
+
   const handleSaveEvent = async (eventData: Omit<TribunalEvent, 'id'>) => {
-    if (!session) return;
+    if (!session || !profile) return;
     const payload = { ...eventData, startTime: eventData.startTime.toISOString(), endTime: eventData.endTime.toISOString(), user_id: session.user.id };
     try {
-      if (selectedEvent) await supabase.from('events').update(payload).eq('id', selectedEvent.id);
-      else await supabase.from('events').insert({ ...payload, id: crypto.randomUUID() });
+      if (selectedEvent) {
+        await supabase.from('events').update(payload).eq('id', selectedEvent.id);
+        notifyAction(eventData.status === 'cancelado' ? 'canceló' : 'actualizó', eventData.title);
+      } else {
+        await supabase.from('events').insert({ ...payload, id: crypto.randomUUID() });
+        notifyAction('creó', eventData.title);
+      }
     } catch (err) { console.error(err); }
   };
 
   const handleDeleteEvent = async (id: string) => {
-    await supabase.from('events').delete().eq('id', id);
+    const event = events.find(e => e.id === id);
+    if (event) {
+      await supabase.from('events').delete().eq('id', id);
+      notifyAction('eliminó', event.title);
+    }
     setIsModalOpen(false);
   };
 
-  const handleMoveEvent = async (eventId: string, targetDate: Date) => {
-    const event = events.find(e => e.id === eventId);
-    if (!event) return;
-    const duration = event.endTime.getTime() - event.startTime.getTime();
-    const newStart = new Date(targetDate);
-    newStart.setHours(event.startTime.getHours(), event.startTime.getMinutes());
-    const newEnd = new Date(newStart.getTime() + duration);
-    await supabase.from('events').update({ startTime: newStart.toISOString(), endTime: newEnd.toISOString() }).eq('id', eventId);
-  };
-
+  // 6. RETORNOS CONDICIONALES (Después de todos los hooks)
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
-      <div className="relative">
-        <Loader2 className="w-16 h-16 text-blue-500 animate-spin" />
-        <ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-      </div>
-      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Verificando Credenciales Judiciales...</p>
+      <div className="relative"><Loader2 className="w-16 h-16 text-blue-500 animate-spin" /><ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /></div>
+      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Cargando TribunalSync...</p>
     </div>
   );
 
   if (!session) return <AuthModal />;
 
+  if (profile && !profile.is_approved) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
+        <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-slate-200 max-w-lg animate-in zoom-in-95 duration-500">
+           <div className="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-8 shadow-inner ring-8 ring-amber-50">
+             <ShieldAlert className="w-12 h-12 text-amber-600" />
+           </div>
+           <h1 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">Acceso Restringido</h1>
+           <p className="text-slate-500 font-medium mb-8 leading-relaxed">
+             Hola <span className="text-slate-800 font-bold">{profile.full_name}</span>. Tu cuenta ha sido creada exitosamente, pero por motivos de seguridad, un administrador debe aprobar tu acceso.
+           </p>
+           <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl mb-8 text-left">
+             <div className="flex gap-4">
+                <Users className="w-6 h-6 text-blue-600 shrink-0" />
+                <div>
+                   <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Responsable de Seguridad</p>
+                   <p className="text-sm font-bold text-blue-700">Gerson Informatica</p>
+                   <p className="text-[10px] text-blue-500 mt-1 uppercase font-black">gerson.informatica@gmail.com</p>
+                </div>
+             </div>
+           </div>
+           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Se ha notificado al administrador de tu solicitud</p>
+           <button 
+             onClick={() => supabase.auth.signOut()}
+             className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors"
+           >
+             Cerrar Sesión
+           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 7. RENDERIZADO PRINCIPAL
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-900 overflow-hidden font-inter">
       <Sidebar 
-        units={units}
-        activeUnitId={activeUnitId} 
-        activeView={activeView}
-        user={profile}
-        onSelectView={setActiveView}
-        onSelectUnit={setActiveUnitId} 
+        units={units} activeUnitId={activeUnitId} activeView={activeView} user={profile}
+        onSelectView={setActiveView} onSelectUnit={setActiveUnitId} 
         onManageUnits={() => setIsUnitModalOpen(true)}
       />
 
       <main className="flex-1 flex flex-col p-8 h-screen overflow-y-auto">
         <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-4">
-             <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-               isOnline ? 'bg-green-50 border-green-200 text-green-600 shadow-sm' : 'bg-red-50 border-red-200 text-red-600'
-             }`}>
-               <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-               {isOnline ? 'Tribunal Cloud: Activo' : 'Sin Conexión'}
-             </div>
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${isOnline ? 'bg-green-50 border-green-200 text-green-600 shadow-sm' : 'bg-red-50 border-red-200 text-red-600'}`}>
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            {isOnline ? 'Tribunal Cloud: Activo' : 'Sin Conexión'}
           </div>
           
           <div className="flex gap-3">
             <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
-              <button onClick={() => exportToPDF(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-colors">
-                <FileText className="w-4 h-4 text-red-500" />
-                PDF
-              </button>
-              <button onClick={() => exportToExcel(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-colors">
-                <BarChart3 className="w-4 h-4 text-green-500" />
-                Excel
-              </button>
+              <button onClick={() => exportToPDF(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-colors"><FileText className="w-4 h-4 text-red-500" />PDF</button>
+              <button onClick={() => exportToExcel(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-colors"><BarChart3 className="w-4 h-4 text-green-500" />Excel</button>
             </div>
-            <button 
-              onClick={() => { setIsAnalyzing(true); analyzeSchedule(eventsWithUnit).then(res => { setAiAnalysis(res); setIsAnalyzing(false); }); }}
-              disabled={isAnalyzing}
-              className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-2xl shadow-lg hover:shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50"
-            >
-              {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              Asistente IA
+            <button onClick={() => { setIsAnalyzing(true); analyzeSchedule(eventsWithUnit).then(res => { setAiAnalysis(res); setIsAnalyzing(false); }); }} disabled={isAnalyzing} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-bold rounded-2xl shadow-lg hover:shadow-indigo-200 transition-all active:scale-95 disabled:opacity-50">
+              {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}Asistente IA
             </button>
           </div>
         </div>
@@ -285,128 +287,64 @@ const App: React.FC = () => {
           <div className="flex-1 min-w-0">
             {activeView === 'calendar' ? (
               <CalendarGrid 
-                currentDate={currentDate} 
-                setCurrentDate={setCurrentDate} 
-                events={filteredEvents}
-                units={units}
+                currentDate={currentDate} setCurrentDate={setCurrentDate} events={filteredEvents} units={units}
                 onAddEvent={(date) => { setSelectedDate(date); setSelectedEvent(undefined); setIsModalOpen(true); }}
                 onEditEvent={(event) => { setSelectedEvent(event); setSelectedDate(undefined); setIsModalOpen(true); }}
-                onMoveEvent={handleMoveEvent}
+                onMoveEvent={(id, date) => {
+                  const event = events.find(e => e.id === id);
+                  if (event) {
+                    const duration = event.endTime.getTime() - event.startTime.getTime();
+                    const newStart = new Date(date);
+                    newStart.setHours(event.startTime.getHours(), event.startTime.getMinutes());
+                    supabase.from('events').update({ startTime: newStart.toISOString(), endTime: new Date(newStart.getTime() + duration).toISOString() }).eq('id', id).then(() => notifyAction('actualizó', event.title));
+                  }
+                }}
               />
             ) : (
-              <ListView 
-                title={activeView === 'tasks' ? 'Tareas Judiciales' : activeView === 'reminders' ? 'Recordatorios' : 'Reuniones'}
-                events={filteredEvents}
-                units={units}
-                onEditEvent={(event) => { setSelectedEvent(event); setIsModalOpen(true); }}
-                onToggleStatus={(event) => handleSaveEvent({ ...event, status: event.status === 'completado' ? 'pendiente' : 'completado' })}
-              />
+              <ListView title={activeView === 'tasks' ? 'Tareas Judiciales' : activeView === 'reminders' ? 'Recordatorios' : 'Reuniones'} events={filteredEvents} units={units} onEditEvent={(event) => { setSelectedEvent(event); setIsModalOpen(true); }} onToggleStatus={(event) => handleSaveEvent({ ...event, status: event.status === 'completado' ? 'pendiente' : 'completado' })} />
             )}
           </div>
 
           <aside className="w-80 flex flex-col gap-6 h-full overflow-y-auto no-scrollbar shrink-0">
-            {/* Personal en Línea */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40">
               <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center justify-between uppercase tracking-widest">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-blue-600" />
-                  Personal Online
-                </div>
+                <div className="flex items-center gap-2"><Users className="w-4 h-4 text-blue-600" />Personal Online</div>
                 <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[10px]">{onlineUsers.length}</span>
               </h4>
               <div className="space-y-3">
                 {onlineUsers.map((u) => (
                   <div key={u.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-100 rounded-2xl transition-all hover:translate-x-1">
-                    <div className="relative">
-                      <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-black">
-                        {u.full_name?.substring(0, 2).toUpperCase() || '??'}
-                      </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-black text-slate-900 truncate">{u.full_name} {u.id === profile?.id ? '(Tú)' : ''}</p>
-                      <p className="text-[9px] text-blue-600 font-bold uppercase">{u.role}</p>
-                    </div>
+                    <div className="relative"><div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-black">{u.full_name?.substring(0, 2).toUpperCase() || '??'}</div><div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full" /></div>
+                    <div className="flex-1 min-w-0"><p className="text-[11px] font-black text-slate-900 truncate">{u.full_name} {u.id === profile?.id ? '(Tú)' : ''}</p><p className="text-[9px] text-blue-600 font-bold uppercase">{u.role}</p></div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Muro de Novedades (Feed) */}
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40 flex-1 flex flex-col min-h-[300px]">
-              <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest">
-                <Activity className="w-4 h-4 text-amber-500" />
-                Muro Judicial
-              </h4>
+              <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest"><Activity className="w-4 h-4 text-amber-500" />Muro Judicial</h4>
               <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar">
                 {activities.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 text-slate-300">
-                    <History className="w-10 h-10 mb-2 opacity-20" />
-                    <p className="text-[10px] font-black uppercase tracking-widest">Sin cambios hoy</p>
-                  </div>
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-300"><History className="w-10 h-10 mb-2 opacity-20" /><p className="text-[10px] font-black uppercase tracking-widest">Esperando actividad...</p></div>
                 ) : (
                   activities.map((act) => (
-                    <div key={act.id} className="relative pl-6 pb-4 group">
-                      <div className="absolute left-0 top-1 w-2 h-2 rounded-full bg-slate-200 group-last:bg-transparent before:content-[''] before:absolute before:left-[3px] before:top-2 before:w-[2px] before:h-full before:bg-slate-100 last:before:hidden" />
-                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 group-hover:border-amber-200 group-hover:bg-amber-50 transition-all">
-                        <p className="text-[10px] text-slate-500 leading-tight">
-                          <span className="font-black text-slate-800">{act.userName}</span> {act.action}
-                        </p>
-                        <p className="text-[11px] font-bold text-slate-700 truncate mt-0.5">"{act.target}"</p>
-                        <p className="text-[8px] text-slate-400 font-black uppercase mt-1 flex items-center gap-1">
-                          <Clock className="w-2.5 h-2.5" />
-                          {format(act.timestamp, 'HH:mm')}
-                        </p>
+                    <div key={act.id} className="relative pl-6 pb-4 group animate-in slide-in-from-right-2 duration-300">
+                      <div className={`absolute left-0 top-1 w-2.5 h-2.5 rounded-full border-2 border-white shadow-sm ${act.action === 'canceló' ? 'bg-red-500 ring-2 ring-red-100' : act.action === 'creó' ? 'bg-green-500 ring-2 ring-green-100' : 'bg-blue-400 ring-2 ring-blue-100'}`} />
+                      <div className="absolute left-[4px] top-4 w-[2px] h-full bg-slate-100 last:hidden" />
+                      <div className={`p-3 rounded-2xl border transition-all ${act.action === 'canceló' ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-md'}`}>
+                        <div className="flex justify-between items-start mb-1"><p className="text-[10px] text-slate-500 leading-tight"><span className="font-black text-slate-900">{act.userName}</span></p><p className="text-[8px] text-slate-400 font-black uppercase flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{format(act.timestamp, 'HH:mm')}</p></div>
+                        <div className="flex items-center gap-2"><p className={`text-[11px] font-bold truncate ${act.action === 'canceló' ? 'text-red-700' : 'text-slate-700'}`}>{act.action === 'creó' ? 'Agendó' : act.action === 'actualizó' ? 'Modificó' : act.action === 'canceló' ? 'CANCELÓ' : 'Eliminó'}: "{act.target}"</p></div>
                       </div>
                     </div>
                   ))
                 )}
               </div>
             </div>
-
-            {/* Gemini Judicial */}
-            <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl p-6 shadow-xl shadow-indigo-200 text-white">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="bg-white/20 p-2 rounded-xl backdrop-blur-md"><Sparkles className="w-5 h-5" /></div>
-                <h4 className="font-bold text-lg tracking-tight">Gemini Judicial</h4>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 min-h-[100px] border border-white/10">
-                {aiAnalysis ? (
-                  <p className="text-xs leading-relaxed italic font-medium">"{aiAnalysis}"</p>
-                ) : (
-                  <div className="flex flex-col gap-2 opacity-50">
-                    <div className="h-2 w-full bg-white/20 rounded-full animate-pulse" />
-                    <div className="h-2 w-3/4 bg-white/20 rounded-full animate-pulse" />
-                    <p className="text-[10px] mt-2 font-bold uppercase tracking-widest text-center">Esperando Análisis</p>
-                  </div>
-                )}
-              </div>
-            </div>
           </aside>
         </div>
 
-        {isModalOpen && (
-          <EventModal 
-            isOpen={isModalOpen} 
-            onClose={() => setIsModalOpen(false)}
-            onSave={handleSaveEvent}
-            onDelete={handleDeleteEvent}
-            units={units}
-            initialDate={selectedDate}
-            initialEvent={selectedEvent}
-          />
-        )}
-
-        {isUnitModalOpen && (
-          <UnitSettingsModal 
-            isOpen={isUnitModalOpen}
-            onClose={() => setIsUnitModalOpen(false)}
-            units={units}
-            events={events}
-            onUpdateUnits={setUnits}
-            onImportData={() => {}} 
-          />
-        )}
+        {isModalOpen && <EventModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveEvent} onDelete={handleDeleteEvent} units={units} initialDate={selectedDate} initialEvent={selectedEvent} />}
+        {isUnitModalOpen && <UnitSettingsModal isOpen={isUnitModalOpen} onClose={() => setIsUnitModalOpen(false)} units={units} events={events} onUpdateUnits={setUnits} userProfile={profile} onImportData={() => {}} />}
       </main>
     </div>
   );

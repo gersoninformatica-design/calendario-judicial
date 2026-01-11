@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase.ts';
-import { Gavel, Loader2, Mail, Lock, User, LogIn, Info, CheckCircle2 } from 'lucide-react';
+import { Gavel, Loader2, Mail, Lock, User, LogIn, Info, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 const AuthModal: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -19,26 +19,28 @@ const AuthModal: React.FC = () => {
 
     try {
       if (isRegister) {
-        const { error } = await supabase.auth.signUp({
+        // Al registrar, creamos el perfil con is_approved = false
+        // y guardamos el email explícitamente para que Gerson lo vea
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: { 
-            data: { full_name: fullName },
+            data: { 
+              full_name: fullName,
+              is_approved: false,
+              email: email
+            },
             emailRedirectTo: window.location.origin 
           }
         });
-        if (error) throw error;
+        if (signUpError) throw signUpError;
         setMailSent(true);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError) throw signInError;
       }
     } catch (err: any) {
-      if (err.message?.includes('Email not confirmed')) {
-        setError("Por favor, confirma tu correo electrónico antes de ingresar.");
-      } else {
-        setError(err.message || "Error de autenticación");
-      }
+      setError(err.message || "Error de autenticación");
     } finally {
       setLoading(false);
     }
@@ -47,28 +49,15 @@ const AuthModal: React.FC = () => {
   if (mailSent) {
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900 p-4">
-        <div className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl text-center animate-in zoom-in-95 duration-300">
-          <div className="bg-green-100 p-5 rounded-full text-green-600 w-20 h-20 flex items-center justify-center mx-auto mb-6">
-            <CheckCircle2 className="w-10 h-10" />
+        <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl text-center animate-in zoom-in-95 duration-300">
+          <div className="bg-green-100 p-6 rounded-full text-green-600 w-24 h-24 flex items-center justify-center mx-auto mb-8 shadow-inner ring-8 ring-green-50">
+            <ShieldCheck className="w-12 h-12" />
           </div>
-          <h2 className="text-2xl font-black text-slate-800 mb-4">¡Correo Enviado!</h2>
-          <p className="text-slate-500 mb-8 font-medium">
-            Hemos enviado un enlace de confirmación a <span className="font-bold text-slate-700">{email}</span>. 
+          <h2 className="text-2xl font-black text-slate-800 mb-4 tracking-tight">Solicitud de Acceso Enviada</h2>
+          <p className="text-slate-500 mb-8 font-medium leading-relaxed">
+            Hemos enviado un enlace a <span className="font-bold text-slate-800">{email}</span>. Una vez confirmes tu correo, el administrador <span className="text-blue-600 font-bold">Gerson Informatica</span> deberá aprobar tu acceso al sistema.
           </p>
-          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl mb-8 text-left">
-            <div className="flex gap-3">
-              <Info className="w-5 h-5 text-amber-500 shrink-0" />
-              <p className="text-xs text-amber-700 leading-relaxed">
-                <span className="font-bold">Nota importante:</span> Si al hacer clic en el correo ves un error de "localhost", no te preocupes. Tu cuenta ya habrá quedado activada. Solo regresa a esta pestaña e inicia sesión.
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={() => { setMailSent(false); setIsRegister(false); }}
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold shadow-xl hover:bg-black transition-all"
-          >
-            Ir al Inicio de Sesión
-          </button>
+          <button onClick={() => { setMailSent(false); setIsRegister(false); }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl hover:bg-black transition-all">Ir al Inicio de Sesión</button>
         </div>
       </div>
     );
@@ -76,78 +65,32 @@ const AuthModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900 p-4">
-      <div className="bg-white rounded-[2.5rem] w-full max-w-md p-10 shadow-2xl animate-in fade-in zoom-in-95 duration-300">
-        <div className="flex flex-col items-center mb-8">
-          <div className="bg-blue-600 p-4 rounded-3xl text-white shadow-xl shadow-blue-200 mb-4">
-            <Gavel className="w-10 h-10" />
-          </div>
+      <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in fade-in zoom-in-95 duration-300">
+        <div className="flex flex-col items-center mb-10">
+          <div className="bg-blue-600 p-5 rounded-[2rem] text-white shadow-2xl shadow-blue-200 mb-6 group hover:rotate-6 transition-transform"><Gavel className="w-10 h-10" /></div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">TribunalSync</h1>
-          <p className="text-slate-400 text-sm font-medium mt-1">Acceso Seguro al Despacho</p>
+          <p className="text-slate-400 text-xs font-black uppercase tracking-widest mt-2">Acceso Jurídico Cloud</p>
         </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
           {isRegister && (
             <div className="relative">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                required
-                type="text"
-                placeholder="Nombre completo"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-medium"
-              />
+              <User className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <input required type="text" placeholder="Nombre completo" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-bold shadow-inner" />
             </div>
           )}
+          <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input required type="email" placeholder="Correo institucional" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-bold shadow-inner" /></div>
+          <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" /><input required type="password" placeholder="Contraseña segura" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-14 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-bold shadow-inner" /></div>
 
-          <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <input
-              required
-              type="email"
-              placeholder="Correo electrónico"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-medium"
-            />
-          </div>
+          {error && <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex gap-3 items-center text-red-600"><Info className="w-5 h-5 shrink-0" /><p className="text-[10px] font-black uppercase leading-tight">{error}</p></div>}
 
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-            <input
-              required
-              type="password"
-              placeholder="Contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 outline-none transition-all font-medium"
-            />
-          </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-100 p-3 rounded-xl flex gap-2 items-center text-red-600">
-              <Info className="w-4 h-4 shrink-0" />
-              <p className="text-[11px] font-bold leading-tight">{error}</p>
-            </div>
-          )}
-
-          <button
-            disabled={loading}
-            className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 group"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
-            {isRegister ? 'Crear Cuenta Judicial' : 'Ingresar al Sistema'}
+          <button disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all flex items-center justify-center gap-3 active:scale-95">
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
+            {isRegister ? 'Solicitar Acceso' : 'Ingresar al Despacho'}
           </button>
         </form>
 
-        <div className="mt-8 text-center">
-          <button 
-            onClick={() => { setIsRegister(!isRegister); setError(null); }}
-            className="text-slate-500 text-sm font-bold hover:text-blue-600 transition-colors"
-          >
-            {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes acceso? Regístrate aquí'}
-          </button>
-        </div>
+        <div className="mt-8 text-center"><button onClick={() => { setIsRegister(!isRegister); setError(null); }} className="text-slate-400 text-[10px] font-black uppercase tracking-widest hover:text-blue-600 transition-colors">{isRegister ? '¿Ya eres parte del equipo? Inicia sesión' : '¿Nuevo funcionario? Regístrate aquí'}</button></div>
       </div>
     </div>
   );
