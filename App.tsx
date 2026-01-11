@@ -60,21 +60,27 @@ const App: React.FC = () => {
   const isAdmin = useMemo(() => checkIsAdmin(session?.user?.email), [session]);
 
   useEffect(() => {
-    // Detectar modo recuperación desde la URL
-    if (window.location.hash.includes('type=recovery')) {
+    // Detectar modo recuperación inicial SOLO si no hay sesión
+    if (window.location.hash.includes('type=recovery') || window.location.hash.includes('access_token=')) {
       setIsRecoveryMode(true);
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
+      if (session) {
+        setIsRecoveryMode(false); // Si hay sesión, ignorar recuperación
+        fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
+      } else if (session) {
+        setIsRecoveryMode(false); // Limpiar modo recuperación al detectar sesión
       }
+
       if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
       else {
         setProfile(null);
@@ -179,6 +185,11 @@ const App: React.FC = () => {
     fetchData();
   }, [session, profile, isAdmin]);
 
+  const handleRecoveryComplete = () => {
+    setIsRecoveryMode(false);
+    window.location.hash = ''; 
+  };
+
   const filteredEvents = useMemo(() => {
     let base = events;
     if (activeUnitId) base = base.filter(e => e.unitId === activeUnitId);
@@ -226,15 +237,16 @@ const App: React.FC = () => {
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
       <div className="relative"><Loader2 className="w-16 h-16 text-blue-500 animate-spin" /><ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /></div>
-      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Cargando TribunalSync...</p>
+      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Sincronizando Despacho...</p>
     </div>
   );
 
-  // SI HAY SESIÓN PERO ESTAMOS EN MODO RECUPERACIÓN, MOSTRAR AUTHMODAL PARA ACTUALIZAR CLAVE
-  if (isRecoveryMode) return <AuthModal />;
+  // MUESTRA EL MODAL SI ESTAMOS EN RECUPERACIÓN O NO HAY SESIÓN
+  if (isRecoveryMode || !session) {
+    return <AuthModal onRecoveryComplete={handleRecoveryComplete} />;
+  }
 
-  if (!session) return <AuthModal />;
-
+  // PANTALLA DE APROBACIÓN PARA NUEVOS USUARIOS
   if (profile && !profile.is_approved && !isAdmin) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
@@ -242,9 +254,9 @@ const App: React.FC = () => {
            <div className="w-24 h-24 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-8 shadow-inner ring-8 ring-amber-50">
              <ShieldAlert className="w-12 h-12 text-amber-600" />
            </div>
-           <h1 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">Acceso Restringido</h1>
+           <h1 className="text-3xl font-black text-slate-800 mb-4 tracking-tight">Acceso Pendiente</h1>
            <p className="text-slate-500 font-medium mb-8 leading-relaxed">
-             Hola <span className="text-slate-800 font-bold">{profile.full_name}</span>. Tu cuenta ha sido creada exitosamente, pero por motivos de seguridad, un administrador debe aprobar tu acceso.
+             Hola <span className="text-slate-800 font-bold">{profile.full_name}</span>. Tu cuenta está verificada, pero un administrador debe autorizar tu ingreso por primera vez.
            </p>
            <div className="bg-blue-50 border border-blue-100 p-6 rounded-3xl mb-8 text-left">
              <div className="flex gap-4">
@@ -252,12 +264,10 @@ const App: React.FC = () => {
                 <div>
                    <p className="text-xs font-black text-blue-900 uppercase tracking-widest mb-1">Responsable de Seguridad</p>
                    <p className="text-sm font-bold text-blue-700">Gerson Informatica</p>
-                   <p className="text-[10px] text-blue-500 mt-1 uppercase font-black">gerson.informatica@gmail.com</p>
                 </div>
              </div>
            </div>
-           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Se ha notificado al administrador de tu solicitud</p>
-           <button onClick={() => supabase.auth.signOut()} className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors">Cerrar Sesión</button>
+           <button onClick={() => { supabase.auth.signOut(); window.location.reload(); }} className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors">Cerrar Sesión</button>
         </div>
       </div>
     );
@@ -327,25 +337,6 @@ const App: React.FC = () => {
                     <div className="flex-1 min-w-0"><p className="text-[11px] font-black text-slate-900 truncate">{u.full_name} {u.id === profile?.id ? '(Tú)' : ''}</p><p className="text-[9px] text-blue-600 font-bold uppercase">{u.role}</p></div>
                   </div>
                 ))}
-              </div>
-            </div>
-            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40 flex-1 flex flex-col min-h-[300px]">
-              <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest"><Activity className="w-4 h-4 text-amber-500" />Muro Judicial</h4>
-              <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar">
-                {activities.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 text-slate-300"><History className="w-10 h-10 mb-2 opacity-20" /><p className="text-[10px] font-black uppercase tracking-widest">Esperando actividad...</p></div>
-                ) : (
-                  activities.map((act) => (
-                    <div key={act.id} className="relative pl-6 pb-4 group animate-in slide-in-from-right-2 duration-300">
-                      <div className={`absolute left-0 top-1 w-2.5 h-2.5 rounded-full border-2 border-white shadow-sm ${act.action === 'canceló' ? 'bg-red-500 ring-2 ring-red-100' : act.action === 'creó' ? 'bg-green-500 ring-2 ring-green-100' : 'bg-blue-400 ring-2 ring-blue-100'}`} />
-                      <div className="absolute left-[4px] top-4 w-[2px] h-full bg-slate-100 last:hidden" />
-                      <div className={`p-3 rounded-2xl border transition-all ${act.action === 'canceló' ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-md'}`}>
-                        <div className="flex justify-between items-start mb-1"><p className="text-[10px] text-slate-500 leading-tight"><span className="font-black text-slate-900">{act.userName}</span></p><p className="text-[8px] text-slate-400 font-black uppercase flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{format(act.timestamp, 'HH:mm')}</p></div>
-                        <div className="flex items-center gap-2"><p className={`text-[11px] font-bold truncate ${act.action === 'canceló' ? 'text-red-700' : 'text-slate-700'}`}>{act.action === 'creó' ? 'Agendó' : act.action === 'actualizó' ? 'Modificó' : act.action === 'canceló' ? 'CANCELÓ' : 'Eliminó'}: "{act.target}"</p></div>
-                      </div>
-                    </div>
-                  ))
-                )}
               </div>
             </div>
           </aside>
