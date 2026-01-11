@@ -1,0 +1,8 @@
+{
+  "name": "TribunalSync - Calendario Judicial Inteligente2",
+  "description": "Una aplicación avanzada de gestión de calendario para tribunales, con soporte para múltiples unidades, recordatorios, tareas y exportación profesional.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
