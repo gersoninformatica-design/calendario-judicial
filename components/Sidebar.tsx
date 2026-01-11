@@ -8,20 +8,23 @@ import {
   ChevronRight, 
   Settings,
   Plus,
-  Users
+  Users,
+  LogOut
 } from 'lucide-react';
-import { Unit } from '../types.ts';
+import { Unit, UserProfile } from '../types.ts';
+import { supabase } from '../lib/supabase.ts';
 
 interface SidebarProps {
   units: Unit[];
   activeUnitId: string | null;
   activeView: 'calendar' | 'tasks' | 'reminders' | 'reunions';
+  user: UserProfile | null;
   onSelectView: (view: 'calendar' | 'tasks' | 'reminders' | 'reunions') => void;
   onSelectUnit: (unitId: string | null) => void;
   onManageUnits: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ units, activeUnitId, activeView, onSelectView, onSelectUnit, onManageUnits }) => {
+const Sidebar: React.FC<SidebarProps> = ({ units, activeUnitId, activeView, user, onSelectView, onSelectUnit, onManageUnits }) => {
   const menuItems = [
     { icon: <Calendar className="w-5 h-5" />, label: 'Calendario', id: 'calendar' },
     { icon: <CheckSquare className="w-5 h-5" />, label: 'Tareas', id: 'tasks' },
@@ -36,6 +39,10 @@ const Sidebar: React.FC<SidebarProps> = ({ units, activeUnitId, activeView, onSe
       rose: 'bg-rose-400', indigo: 'bg-indigo-400'
     };
     return bgMap[color] || 'bg-slate-400';
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
   return (
@@ -113,18 +120,27 @@ const Sidebar: React.FC<SidebarProps> = ({ units, activeUnitId, activeView, onSe
 
       <div className="mt-auto pt-6 border-t border-slate-100">
         <div className="bg-slate-50 rounded-2xl p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs">
-              GV
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs uppercase">
+                {user?.full_name?.substring(0, 2) || '??'}
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-800 leading-tight truncate max-w-[100px]">{user?.full_name || 'Usuario'}</p>
+                <p className="text-[9px] text-slate-500 font-medium">{user?.role || 'Cargando...'}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-bold text-slate-800">Gerson Valenzuela</p>
-              <p className="text-[10px] text-slate-500">Administrativo Informático</p>
-            </div>
+            <button 
+              onClick={handleLogout}
+              className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
           <div className="px-1">
-            <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest text-center mt-2">
-              Calendario Judicial Inteligente
+            <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest text-center mt-2">
+              Calendario Judicial Cloud
             </p>
           </div>
         </div>

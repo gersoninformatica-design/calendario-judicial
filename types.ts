@@ -5,13 +5,21 @@ export interface Unit {
   color: 'blue' | 'red' | 'purple' | 'green' | 'amber' | 'slate' | 'rose' | 'indigo';
 }
 
+export interface UserProfile {
+  id: string;
+  full_name: string;
+  role: string;
+  avatar_url?: string;
+}
+
 export interface TribunalEvent {
   id: string;
   title: string;
   description: string;
   startTime: Date;
   endTime: Date;
-  unitId: string; // Relación por ID para permitir renombrar unidades
+  unitId: string;
+  user_id?: string; // ID del creador
   type: 'audiencia' | 'reunion' | 'tarea' | 'recordatorio';
   status: 'pendiente' | 'completado' | 'cancelado';
 }
