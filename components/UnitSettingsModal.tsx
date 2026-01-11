@@ -68,8 +68,7 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
     
     setIsCreatingManual(true);
     try {
-      // Creamos el perfil con un ID temporal (el correo) o dejamos que Supabase maneje la entrada
-      // Importante: is_approved: true para que entren directo
+      // Restaurado: Se vuelve a incluir el email en la inserción manual
       const { error } = await supabase.from('profiles').insert({
         full_name: manualName,
         email: manualEmail.toLowerCase().trim(),
@@ -82,7 +81,7 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
       setManualName('');
       setManualEmail('');
       fetchUsers();
-      alert(`¡Listo Gerson! ${manualName} ya está pre-aprobado. Ahora solo debe registrarse con su correo.`);
+      alert(`¡Listo Gerson! ${manualName} ya está pre-aprobado. Pídele que se registre con su correo institucional.`);
     } catch (err: any) {
       alert("Error: " + err.message);
     } finally {
@@ -145,7 +144,6 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
 
           {activeTab === 'users' && isAdmin && (
             <div className="space-y-8 animate-in fade-in duration-300">
-               {/* FORMULARIO DE REGISTRO MANUAL DE GERSON */}
                <div className="bg-amber-50 border-2 border-amber-100 rounded-[2.5rem] p-8">
                   <div className="flex items-center gap-3 mb-6">
                     <UserPlus className="w-6 h-6 text-amber-600" />
@@ -183,9 +181,6 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
                       Autorizar Acceso Inmediato
                     </button>
                   </form>
-                  <p className="text-[9px] text-amber-600 font-bold mt-4 text-center px-4">
-                    * Una vez registrado aquí, el funcionario solo deberá crear su cuenta con este correo y entrará directo.
-                  </p>
                </div>
 
                <div className="space-y-4">
@@ -209,7 +204,7 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
                                   <p className="text-sm font-black text-slate-800">{u.full_name}</p>
                                   {u.is_approved && <UserCheck className="w-3 h-3 text-green-500" />}
                                 </div>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.email}</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.email || 'Sin correo'}</p>
                              </div>
                           </div>
                           <div className="flex gap-2">

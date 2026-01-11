@@ -54,7 +54,6 @@ const App: React.FC = () => {
 
   const broadcastChannel = useRef<any>(null);
 
-  // Validación Maestra de Gerson (Case Insensitive)
   const ADMIN_EMAIL = 'gerson.informatica@gmail.com';
   const checkIsAdmin = (email?: string) => email?.toLowerCase().trim() === ADMIN_EMAIL;
   const isAdmin = useMemo(() => checkIsAdmin(session?.user?.email), [session]);
@@ -80,25 +79,41 @@ const App: React.FC = () => {
 
   const fetchOrCreateProfile = async (userId: string, email: string | undefined, fullName: string | undefined) => {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      // 1. Intentar buscar por ID (usuario ya registrado antes)
+      let { data: profileData, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      
+      // 2. Si no hay por ID, buscar por EMAIL (invitación previa de Gerson)
+      if (error && email) {
+        const { data: inviteData } = await supabase.from('profiles').select('*').eq('email', email.toLowerCase().trim()).single();
+        if (inviteData) {
+          // Vincular la invitación con el nuevo ID de Auth
+          const { data: updatedProfile } = await supabase.from('profiles').update({ id: userId }).eq('email', email.toLowerCase().trim()).select().single();
+          if (updatedProfile) {
+            setProfile(updatedProfile);
+            return;
+          }
+        }
+      }
+
+      // 3. Si no existe de ninguna forma, crear nuevo
       if (error && (error.code === 'PGRST116' || error.message.includes('No rows found'))) {
         const isUserGerson = checkIsAdmin(email);
         const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
           id: userId,
           full_name: fullName || 'Funcionario Judicial',
+          email: email?.toLowerCase().trim(),
           role: isUserGerson ? 'Administrador de Sistemas' : 'Funcionario Judicial',
-          is_approved: isUserGerson,
-          email: email
+          is_approved: isUserGerson
         }).select().single();
-        if (createError) console.error(createError);
+        
+        if (createError) console.error("Error creating profile:", createError);
         if (newProfile) setProfile(newProfile);
-      } else if (data) {
-        if (!data.email && email) {
-          await supabase.from('profiles').update({ email }).eq('id', userId);
-        }
-        setProfile(data);
+      } else if (profileData) {
+        setProfile(profileData);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error("Critical Profile Error:", err); 
+    }
   };
 
   useEffect(() => {
