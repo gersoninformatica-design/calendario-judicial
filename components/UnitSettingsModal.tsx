@@ -24,7 +24,6 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   
-  // Estados para Registro Manual
   const [manualName, setManualName] = useState('');
   const [manualEmail, setManualEmail] = useState('');
   const [isCreatingManual, setIsCreatingManual] = useState(false);
@@ -68,8 +67,10 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
     
     setIsCreatingManual(true);
     try {
-      // Restaurado: Se vuelve a incluir el email en la inserción manual
+      // FIX GERSON: Generamos un ID aleatorio para que la base de datos no rechace el registro
+      const tempId = crypto.randomUUID();
       const { error } = await supabase.from('profiles').insert({
+        id: tempId,
         full_name: manualName,
         email: manualEmail.toLowerCase().trim(),
         is_approved: true,
@@ -81,9 +82,10 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
       setManualName('');
       setManualEmail('');
       fetchUsers();
-      alert(`¡Listo Gerson! ${manualName} ya está pre-aprobado. Pídele que se registre con su correo institucional.`);
+      alert(`¡Autorizado! ${manualName} ya puede ingresar cuando se registre.`);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      console.error(err);
+      alert("Error de Base de Datos: " + err.message + ". Asegúrate de haber ejecutado el SQL de limpieza de restricciones.");
     } finally {
       setIsCreatingManual(false);
     }

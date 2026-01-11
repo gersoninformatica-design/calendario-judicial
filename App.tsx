@@ -79,37 +79,46 @@ const App: React.FC = () => {
 
   const fetchOrCreateProfile = async (userId: string, email: string | undefined, fullName: string | undefined) => {
     try {
-      // 1. Intentar buscar por ID
-      let { data: profileData, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      // 1. ¿Ya existe este usuario por ID real?
+      let { data: profileData } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       
-      // 2. Si no hay por ID, buscar por EMAIL (invitación previa)
-      if (!profileData && email) {
+      if (profileData) {
+        setProfile(profileData);
+        return;
+      }
+
+      // 2. Si no existe por ID, ¿existe por EMAIL (fue una invitación de Gerson)?
+      if (email) {
         const { data: inviteData } = await supabase.from('profiles').select('*').eq('email', email.toLowerCase().trim()).maybeSingle();
+        
         if (inviteData) {
-          const { data: updatedProfile } = await supabase.from('profiles').update({ id: userId }).eq('email', email.toLowerCase().trim()).select().single();
-          if (updatedProfile) {
+          // Si existe por email pero tiene un ID diferente (el ID temporal de la invitación), lo actualizamos
+          const { data: updatedProfile, error: updateError } = await supabase.from('profiles')
+            .update({ id: userId, full_name: fullName || inviteData.full_name })
+            .eq('email', email.toLowerCase().trim())
+            .select()
+            .single();
+            
+          if (!updateError && updatedProfile) {
             setProfile(updatedProfile);
             return;
           }
         }
       }
 
-      // 3. Crear nuevo si no existe
-      if (!profileData) {
-        const isUserGerson = checkIsAdmin(email);
-        const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
-          id: userId,
-          full_name: fullName || 'Funcionario Judicial',
-          email: email?.toLowerCase().trim(),
-          role: isUserGerson ? 'Administrador de Sistemas' : 'Funcionario Judicial',
-          is_approved: isUserGerson
-        }).select().maybeSingle();
-        
-        if (createError) console.error("Error creating profile:", createError);
-        if (newProfile) setProfile(newProfile);
-      } else {
-        setProfile(profileData);
-      }
+      // 3. Si no existe de ninguna forma, crear nuevo
+      const isUserGerson = checkIsAdmin(email);
+      const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
+        id: userId,
+        full_name: fullName || 'Funcionario Judicial',
+        email: email?.toLowerCase().trim(),
+        role: isUserGerson ? 'Administrador de Sistemas' : 'Funcionario Judicial',
+        is_approved: isUserGerson
+      }).select().maybeSingle();
+      
+      if (createError) console.error("Error creating profile:", createError);
+      if (newProfile) setProfile(newProfile);
+
     } catch (err) { 
       console.error("Critical Profile Error:", err); 
     }
