@@ -19,7 +19,9 @@ import {
   Activity, 
   History, 
   Clock, 
-  ShieldAlert 
+  ShieldAlert,
+  RefreshCw,
+  LogOut
 } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
@@ -57,7 +59,15 @@ const App: React.FC = () => {
 
   const ADMIN_EMAIL = 'gerson.informatica@gmail.com';
   const checkIsAdmin = (email?: string) => email?.toLowerCase().trim() === ADMIN_EMAIL;
+  
+  // isAdmin se basa puramente en el correo de la sesión de Supabase
   const isAdmin = useMemo(() => checkIsAdmin(session?.user?.email), [session]);
+
+  // isApproved es true si el perfil dice que sí O si eres el Administrador Gerson (Failsafe)
+  const isApproved = useMemo(() => {
+    if (isAdmin) return true;
+    return profile?.is_approved || false;
+  }, [profile, isAdmin]);
 
   useEffect(() => {
     // Detectar modo recuperación inicial SOLO si no hay sesión
@@ -68,7 +78,7 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        setIsRecoveryMode(false); // Si hay sesión, ignorar recuperación
+        setIsRecoveryMode(false);
         fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
       }
     });
@@ -78,7 +88,7 @@ const App: React.FC = () => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
       } else if (session) {
-        setIsRecoveryMode(false); // Limpiar modo recuperación al detectar sesión
+        setIsRecoveryMode(false);
       }
 
       if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
@@ -127,7 +137,6 @@ const App: React.FC = () => {
         is_approved: isUserGerson
       }).select().maybeSingle();
       
-      if (createError) console.error("Error creating profile:", createError);
       if (newProfile) setProfile(newProfile);
 
     } catch (err) { 
@@ -136,7 +145,7 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!session || !profile || (!profile.is_approved && !isAdmin)) return;
+    if (!session || !profile || !isApproved) return;
     const channel = supabase.channel('tribunal-realtime', { config: { presence: { key: session.user.id } } });
     broadcastChannel.current = channel;
     channel
@@ -166,10 +175,10 @@ const App: React.FC = () => {
         }
       });
     return () => { channel.unsubscribe(); };
-  }, [session, profile, isAdmin]);
+  }, [session, profile, isApproved]);
 
   useEffect(() => {
-    if (!session || (profile && !profile.is_approved && !isAdmin)) {
+    if (!session || (profile && !isApproved)) {
       setIsLoaded(true);
       return;
     }
@@ -183,11 +192,16 @@ const App: React.FC = () => {
       } catch (err) { setIsOnline(false); setIsLoaded(true); }
     };
     fetchData();
-  }, [session, profile, isAdmin]);
+  }, [session, profile, isApproved]);
 
   const handleRecoveryComplete = () => {
     setIsRecoveryMode(false);
     window.location.hash = ''; 
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    window.location.href = window.location.origin;
   };
 
   const filteredEvents = useMemo(() => {
@@ -237,17 +251,16 @@ const App: React.FC = () => {
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
       <div className="relative"><Loader2 className="w-16 h-16 text-blue-500 animate-spin" /><ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /></div>
-      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Sincronizando Despacho...</p>
+      <p className="text-slate-400 font-bold mt-6 tracking-widest uppercase text-[10px]">Verificando Credenciales...</p>
     </div>
   );
 
-  // MUESTRA EL MODAL SI ESTAMOS EN RECUPERACIÓN O NO HAY SESIÓN
   if (isRecoveryMode || !session) {
     return <AuthModal onRecoveryComplete={handleRecoveryComplete} />;
   }
 
-  // PANTALLA DE APROBACIÓN PARA NUEVOS USUARIOS
-  if (profile && !profile.is_approved && !isAdmin) {
+  // PANTALLA DE APROBACIÓN PARA NUEVOS USUARIOS (Ej: PABLITO)
+  if (profile && !isApproved) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <div className="bg-white p-12 rounded-[3rem] shadow-2xl border border-slate-200 max-w-lg animate-in zoom-in-95 duration-500">
@@ -267,7 +280,14 @@ const App: React.FC = () => {
                 </div>
              </div>
            </div>
-           <button onClick={() => { supabase.auth.signOut(); window.location.reload(); }} className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors">Cerrar Sesión</button>
+           <div className="flex flex-col gap-4">
+             <button onClick={() => window.location.reload()} className="flex items-center justify-center gap-2 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all">
+               <RefreshCw className="w-4 h-4" /> Verificar Aprobación
+             </button>
+             <button onClick={handleSignOut} className="py-2 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-red-500 transition-colors flex items-center justify-center gap-2">
+               <LogOut className="w-4 h-4" /> Cerrar Sesión e Ingresar como Admin
+             </button>
+           </div>
         </div>
       </div>
     );
