@@ -8,7 +8,7 @@ import UnitSettingsModal from './components/UnitSettingsModal.tsx';
 import AuthModal from './components/AuthModal.tsx';
 import { TribunalEvent, Unit, UserProfile } from './types.ts';
 import { supabase } from './lib/supabase.ts';
-import { FileText, BarChart3, Sparkles, Loader2, Globe, Wifi, WifiOff, Users, ShieldCheck } from 'lucide-react';
+import { FileText, BarChart3, Sparkles, Loader2, Globe, Wifi, WifiOff, Users, ShieldCheck, UserCircle } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
 
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
@@ -32,7 +33,7 @@ const App: React.FC = () => {
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // 1. MANEJO DE SESIÓN Y PERFIL CON RETRY PARA EL TRIGGER
+  // 1. MANEJO DE SESIÓN Y PERFIL
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -45,6 +46,7 @@ const App: React.FC = () => {
       else {
         setProfile(null);
         setEvents([]);
+        setOnlineUsers([]);
       }
     });
 
@@ -55,7 +57,6 @@ const App: React.FC = () => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
       if (error && retries > 0) {
-        // El trigger puede tardar milisegundos en crear el perfil después del signup
         setTimeout(() => fetchProfile(userId, retries - 1), 1000);
       } else if (data) {
         setProfile(data);
@@ -65,7 +66,50 @@ const App: React.FC = () => {
     }
   };
 
-  // 2. CARGA DE DATOS (Solo si hay sesión)
+  // 2. MANEJO DE PRESENCIA (Personal en Línea)
+  useEffect(() => {
+    if (!session || !profile) return;
+
+    const channel = supabase.channel('despacho-presencia', {
+      config: {
+        presence: {
+          key: session.user.id,
+        },
+      },
+    });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const newState = channel.presenceState();
+        // Mapear los estados de presencia a una lista plana de usuarios
+        const users = Object.values(newState).flat().map((p: any) => p);
+        // Filtrar duplicados por ID si el mismo usuario tiene varias pestañas
+        const uniqueUsers = Array.from(new Map(users.map(u => [u.id, u])).values());
+        setOnlineUsers(uniqueUsers);
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        console.log('Usuario se unió:', key, newPresences);
+      })
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        console.log('Usuario salió:', key, leftPresences);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Publicar mi propio perfil a los demás
+          await channel.track({
+            id: profile.id,
+            full_name: profile.full_name,
+            role: profile.role || 'Funcionario Judicial'
+          });
+        }
+      });
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [session, profile]);
+
+  // 3. CARGA DE DATOS
   useEffect(() => {
     if (!session) {
       setIsLoaded(true);
@@ -92,7 +136,6 @@ const App: React.FC = () => {
 
     fetchData();
 
-    // Sincronización en tiempo real corregida
     const channel = supabase.channel('db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, async (payload) => {
         if (payload.eventType === 'INSERT') {
@@ -147,12 +190,11 @@ const App: React.FC = () => {
       } else {
         await supabase.from('events').insert({
           ...payload,
-          id: crypto.randomUUID(), // Usar UUID nativo para mayor robustez
+          id: crypto.randomUUID(),
         });
       }
     } catch (err) {
       console.error("Error saving event:", err);
-      alert("Hubo un error al guardar. Revisa la consola.");
     }
   };
 
@@ -269,17 +311,38 @@ const App: React.FC = () => {
                 <Users className="w-5 h-5 text-blue-600" />
                 Despacho Activo
               </h4>
-              <p className="text-[10px] text-slate-400 mb-4 font-bold uppercase tracking-tight">Personal en Línea</p>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 p-3 bg-blue-50/50 border border-blue-100 rounded-2xl shadow-sm">
-                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-black shadow-md">
-                    {profile?.full_name?.substring(0, 2).toUpperCase() || 'U'}
+              <p className="text-[10px] text-slate-400 mb-4 font-bold uppercase tracking-tight">Personal en Línea ({onlineUsers.length})</p>
+              
+              <div className="space-y-3 max-h-[300px] overflow-y-auto no-scrollbar">
+                {onlineUsers.length === 0 ? (
+                  <div className="text-center py-4 border-2 border-dashed border-slate-100 rounded-2xl">
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto text-slate-300" />
+                    <p className="text-[9px] text-slate-400 mt-2">Sincronizando presencia...</p>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-black text-blue-900 truncate">{profile?.full_name || 'Cargando...'}</p>
-                    <p className="text-[9px] text-blue-500 font-black uppercase">{profile?.role || 'Funcionario'}</p>
-                  </div>
-                </div>
+                ) : (
+                  onlineUsers.map((u) => (
+                    <div key={u.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-2xl shadow-sm transition-all hover:scale-[1.02]">
+                      <div className="relative">
+                        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-black shadow-md">
+                          {u.full_name?.substring(0, 2).toUpperCase() || '??'}
+                        </div>
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-black text-slate-900 truncate">
+                          {u.full_name} {u.id === profile?.id ? '(Tú)' : ''}
+                        </p>
+                        <p className="text-[9px] text-blue-600 font-black uppercase tracking-wider">{u.role || 'Funcionario'}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                <p className="text-[9px] text-blue-800 leading-tight">
+                  <span className="font-bold">Info:</span> Los usuarios aparecen aquí automáticamente al abrir el sistema.
+                </p>
               </div>
             </div>
 
