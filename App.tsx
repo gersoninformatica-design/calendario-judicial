@@ -7,7 +7,7 @@ import EventModal from './components/EventModal.tsx';
 import UnitSettingsModal from './components/UnitSettingsModal.tsx';
 import { TribunalEvent, Unit } from './types.ts';
 import { INITIAL_EVENTS, INITIAL_UNITS } from './constants.tsx';
-import { FileText, BarChart3, Sparkles, Loader2, CloudCheck } from 'lucide-react';
+import { FileText, BarChart3, Sparkles, Loader2, HardDrive, Share2, AlertCircle, Check } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
 import { setYear, setMonth, setDate } from 'date-fns';
@@ -16,36 +16,53 @@ const STORAGE_KEY_EVENTS = 'tribunalsync_events_v1';
 const STORAGE_KEY_UNITS = 'tribunalsync_units_v1';
 
 const App: React.FC = () => {
-  // Estado de carga inicial
   const [isLoaded, setIsLoaded] = useState(false);
-  
-  // Datos principales
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
   const [events, setEvents] = useState<TribunalEvent[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
   
-  // UI Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [incomingSyncData, setIncomingSyncData] = useState<{events: TribunalEvent[], units: Unit[]} | null>(null);
+  
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedEvent, setSelectedEvent] = useState<TribunalEvent | undefined>(undefined);
   
-  // AI
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'saved' | 'saving'>('saved');
 
-  // EFECTO 1: Carga inicial desde LocalStorage
+  // CARGA INICIAL Y DETECCIÓN DE SHARE LINK
   useEffect(() => {
     const savedEvents = localStorage.getItem(STORAGE_KEY_EVENTS);
     const savedUnits = localStorage.getItem(STORAGE_KEY_UNITS);
 
+    // Revisar si hay datos compartidos en la URL
+    const hash = window.location.hash;
+    if (hash.startsWith('#share=')) {
+      try {
+        const encodedData = hash.replace('#share=', '');
+        const decodedData = JSON.parse(decodeURIComponent(escape(atob(encodedData))));
+        
+        const hydratedEvents = decodedData.events.map((e: any) => ({
+          ...e,
+          startTime: new Date(e.startTime),
+          endTime: new Date(e.endTime)
+        }));
+        
+        setIncomingSyncData({ events: hydratedEvents, units: decodedData.units });
+        // Limpiar hash de la URL para evitar recargas infinitas
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch (e) {
+        console.error("Error al decodificar datos compartidos:", e);
+      }
+    }
+
     if (savedEvents) {
       try {
         const parsedEvents = JSON.parse(savedEvents);
-        // Convertir strings de fecha de vuelta a objetos Date
         const hydratedEvents = parsedEvents.map((e: any) => ({
           ...e,
           startTime: new Date(e.startTime),
@@ -53,7 +70,6 @@ const App: React.FC = () => {
         }));
         setEvents(hydratedEvents);
       } catch (e) {
-        console.error("Error cargando eventos:", e);
         setEvents(INITIAL_EVENTS);
       }
     } else {
@@ -73,28 +89,24 @@ const App: React.FC = () => {
     setIsLoaded(true);
   }, []);
 
-  // EFECTO 2: Guardado automático cuando cambian los datos
+  // AUTO-GUARDADO
   useEffect(() => {
     if (!isLoaded) return;
-    
     setSyncStatus('saving');
     const timer = setTimeout(() => {
       localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
       localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(units));
       setSyncStatus('saved');
-    }, 500); // Debounce para no saturar el storage
-
+    }, 500);
     return () => clearTimeout(timer);
   }, [events, units, isLoaded]);
 
   const filteredEvents = useMemo(() => {
     let base = events;
     if (activeUnitId) base = base.filter(e => e.unitId === activeUnitId);
-    
     if (activeView === 'tasks') return base.filter(e => e.type === 'tarea');
     if (activeView === 'reminders') return base.filter(e => e.type === 'recordatorio');
     if (activeView === 'reunions') return base.filter(e => e.type === 'reunion');
-    
     return base;
   }, [events, activeUnitId, activeView]);
 
@@ -104,6 +116,34 @@ const App: React.FC = () => {
       unit: units.find(u => u.id === e.unitId)?.name || 'Desconocida'
     }));
   }, [filteredEvents, units]);
+
+  // Fix: Added handleOpenCreateModal to fix error on line 278.
+  const handleOpenCreateModal = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedEvent(undefined);
+    setIsModalOpen(true);
+  };
+
+  // Fix: Added handleOpenEditModal to fix errors on lines 279 and 287.
+  const handleOpenEditModal = (event: TribunalEvent) => {
+    setSelectedEvent(event);
+    setSelectedDate(undefined);
+    setIsModalOpen(true);
+  };
+
+  // Fix: Added handleMoveEvent to fix error on line 280.
+  const handleMoveEvent = (eventId: string, targetDate: Date) => {
+    setEvents(prev => prev.map(e => {
+      if (e.id === eventId) {
+        const duration = e.endTime.getTime() - e.startTime.getTime();
+        const newStart = new Date(targetDate);
+        newStart.setHours(e.startTime.getHours(), e.startTime.getMinutes());
+        const newEnd = new Date(newStart.getTime() + duration);
+        return { ...e, startTime: newStart, endTime: newEnd };
+      }
+      return e;
+    }));
+  };
 
   const handleSaveEvent = (eventData: Omit<TribunalEvent, 'id'>) => {
     if (selectedEvent) {
@@ -115,51 +155,36 @@ const App: React.FC = () => {
       };
       setEvents(prev => [...prev, newEvent]);
     }
-    if (activeUnitId && eventData.unitId !== activeUnitId) {
-      setActiveUnitId(null);
+    if (activeUnitId && eventData.unitId !== activeUnitId) setActiveUnitId(null);
+  };
+
+  const handleShareSync = () => {
+    try {
+      const dataToShare = { units, events };
+      const jsonStr = JSON.stringify(dataToShare);
+      const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
+      const shareUrl = `${window.location.origin}${window.location.pathname}#share=${encoded}`;
+      
+      navigator.clipboard.writeText(shareUrl);
+      alert('¡Enlace de sincronización copiado! Envía este enlace a otra persona para que vea tu agenda actualizada.');
+    } catch (e) {
+      alert('La agenda es demasiado grande para compartir por enlace. Usa "Exportar Datos" en configuración.');
     }
   };
 
-  const handleDeleteEvent = (eventId: string) => {
-    setEvents(prev => prev.filter(e => e.id !== eventId));
-    setIsModalOpen(false);
-  };
-
-  const handleUpdateUnits = (newUnits: Unit[]) => {
-    if (activeUnitId && !newUnits.find(u => u.id === activeUnitId)) {
-      setActiveUnitId(null);
+  const handleAcceptSync = () => {
+    if (incomingSyncData) {
+      setEvents(incomingSyncData.events);
+      setUnits(incomingSyncData.units);
+      setIncomingSyncData(null);
+      alert('Sincronización de equipo completada.');
     }
-    setUnits(newUnits);
-  };
-
-  const handleOpenCreateModal = (date?: Date) => {
-    setSelectedEvent(undefined);
-    setSelectedDate(date);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEditModal = (event: TribunalEvent) => {
-    setSelectedEvent(event);
-    setSelectedDate(undefined);
-    setIsModalOpen(true);
-  };
-
-  const handleMoveEvent = (eventId: string, targetDate: Date) => {
-    setEvents(prev => prev.map(event => {
-      if (event.id === eventId) {
-        const newStartTime = setDate(setMonth(setYear(event.startTime, targetDate.getFullYear()), targetDate.getMonth()), targetDate.getDate());
-        const duration = event.endTime.getTime() - event.startTime.getTime();
-        const newEndTime = new Date(newStartTime.getTime() + duration);
-        return { ...event, startTime: newStartTime, endTime: newEndTime };
-      }
-      return event;
-    }));
   };
 
   const handleImportData = (importedEvents: TribunalEvent[], importedUnits: Unit[]) => {
     setEvents(importedEvents);
     setUnits(importedUnits);
-    alert('Sincronización manual completada con éxito.');
+    alert('Importación manual completada.');
   };
 
   const runAIAnalysis = async () => {
@@ -169,19 +194,10 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
   };
 
-  const getListViewTitle = () => {
-    switch (activeView) {
-      case 'tasks': return 'Tareas Judiciales';
-      case 'reminders': return 'Recordatorios y Alertas';
-      case 'reunions': return 'Reuniones y Sesiones';
-      default: return '';
-    }
-  };
-
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50">
       <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-      <p className="text-slate-500 font-medium animate-pulse">Iniciando TribunalSync...</p>
+      <p className="text-slate-500 font-medium">Cargando Agenda Judicial...</p>
     </div>
   );
 
@@ -197,48 +213,87 @@ const App: React.FC = () => {
       />
 
       <main className="flex-1 flex flex-col p-8 h-screen overflow-y-auto">
+        {/* Header con Sincronización */}
         <div className="flex justify-between items-center mb-8">
-          <div className="flex items-center gap-2">
-             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-               syncStatus === 'saved' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600 animate-pulse'
+          <div className="flex items-center gap-3">
+             <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${
+               syncStatus === 'saved' ? 'bg-white border-slate-200 text-slate-500' : 'bg-amber-50 border-amber-200 text-amber-600 animate-pulse'
              }`}>
-               {syncStatus === 'saved' ? <CloudCheck className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-               {syncStatus === 'saved' ? 'Sincronizado' : 'Guardando...'}
+               {syncStatus === 'saved' ? <HardDrive className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+               {syncStatus === 'saved' ? 'Guardado en PC' : 'Actualizando...'}
              </div>
+             
+             <button 
+              onClick={handleShareSync}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-2xl border border-blue-100 text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all"
+             >
+               <Share2 className="w-3.5 h-3.5" />
+               Sincronizar con Equipo
+             </button>
           </div>
           
           <div className="flex gap-3">
             <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
-              <button 
-                onClick={() => exportToPDF(eventsWithUnit)}
-                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
-              >
+              <button onClick={() => exportToPDF(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl">
                 <FileText className="w-4 h-4 text-red-500" />
-                Exportar PDF
+                PDF
               </button>
-              <div className="w-[1px] bg-slate-200 my-1 mx-1" />
-              <button 
-                onClick={() => exportToExcel(eventsWithUnit)}
-                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
-              >
+              <button onClick={() => exportToExcel(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl">
                 <BarChart3 className="w-4 h-4 text-green-500" />
-                Exportar Excel
+                Excel
               </button>
             </div>
             <button 
               onClick={runAIAnalysis}
               disabled={isAnalyzing}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-bold rounded-2xl shadow-lg shadow-blue-200 hover:shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white text-sm font-bold rounded-2xl shadow-lg hover:bg-black transition-all"
             >
-              {isAnalyzing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
+              {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               Asistente IA
             </button>
           </div>
         </div>
+
+        {/* Modal de Sincronización Entrante */}
+        {incomingSyncData && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+            <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95">
+              <div className="bg-blue-100 w-16 h-16 rounded-3xl flex items-center justify-center text-blue-600 mb-6">
+                <Share2 className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-slate-800 mb-2">Agenda Compartida</h2>
+              <p className="text-slate-500 mb-6 leading-relaxed">
+                Has recibido una actualización de agenda. Si aceptas, se reemplazará tu vista actual con los datos del equipo.
+              </p>
+              <div className="bg-slate-50 rounded-2xl p-4 mb-8 flex justify-around">
+                <div className="text-center">
+                  <p className="text-2xl font-black text-slate-800">{incomingSyncData.events.length}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Eventos</p>
+                </div>
+                <div className="w-[1px] bg-slate-200" />
+                <div className="text-center">
+                  <p className="text-2xl font-black text-slate-800">{incomingSyncData.units.length}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Unidades</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setIncomingSyncData(null)}
+                  className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600"
+                >
+                  Ignorar
+                </button>
+                <button 
+                  onClick={handleAcceptSync}
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-xl shadow-blue-200 hover:bg-blue-700 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-5 h-5" />
+                  Sincronizar Ahora
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex gap-8 flex-1 min-h-0">
           <div className="flex-1 min-w-0">
@@ -254,7 +309,7 @@ const App: React.FC = () => {
               />
             ) : (
               <ListView 
-                title={getListViewTitle()}
+                title={activeView === 'tasks' ? 'Tareas Judiciales' : activeView === 'reminders' ? 'Recordatorios' : 'Reuniones'}
                 events={filteredEvents}
                 units={units}
                 onEditEvent={handleOpenEditModal}
@@ -301,15 +356,10 @@ const App: React.FC = () => {
                 </div>
                 <h4 className="font-bold text-indigo-900">Análisis con IA</h4>
               </div>
-              
               {aiAnalysis ? (
-                <div className="text-sm text-indigo-800 leading-relaxed italic">
-                  "{aiAnalysis}"
-                </div>
+                <div className="text-sm text-indigo-800 leading-relaxed italic">"{aiAnalysis}"</div>
               ) : (
-                <div className="text-sm text-indigo-400">
-                  Haz clic en el botón "Asistente IA" para analizar la agenda actual.
-                </div>
+                <div className="text-sm text-indigo-400">Presiona "Asistente IA" para analizar la carga laboral.</div>
               )}
             </div>
           </div>
@@ -317,11 +367,10 @@ const App: React.FC = () => {
 
         {isModalOpen && (
           <EventModal 
-            key={`event-modal-${selectedEvent?.id || selectedDate?.getTime() || 'new'}`}
             isOpen={isModalOpen} 
             onClose={() => setIsModalOpen(false)}
             onSave={handleSaveEvent}
-            onDelete={handleDeleteEvent}
+            onDelete={(id) => { setEvents(prev => prev.filter(e => e.id !== id)); setIsModalOpen(false); }}
             units={units}
             initialDate={selectedDate}
             initialEvent={selectedEvent}
@@ -330,12 +379,11 @@ const App: React.FC = () => {
 
         {isUnitModalOpen && (
           <UnitSettingsModal 
-            key="unit-settings-modal"
             isOpen={isUnitModalOpen}
             onClose={() => setIsUnitModalOpen(false)}
             units={units}
             events={events}
-            onUpdateUnits={handleUpdateUnits}
+            onUpdateUnits={setUnits}
             onImportData={handleImportData}
           />
         )}
