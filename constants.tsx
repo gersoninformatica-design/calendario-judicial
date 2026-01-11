@@ -2,11 +2,10 @@
 import { Unit, TribunalEvent } from './types.ts';
 
 export const INITIAL_UNITS: Unit[] = [
-  { id: 'u1', name: 'Civil', color: 'blue' },
-  { id: 'u2', name: 'Penal', color: 'red' },
-  { id: 'u3', name: 'Familia', color: 'purple' },
-  { id: 'u4', name: 'Laboral', color: 'green' },
-  { id: 'u5', name: 'Administrativo', color: 'slate' },
+  { id: 'u1', name: 'Familia', color: 'purple' },
+  { id: 'u2', name: 'Administrativo', color: 'slate' },
+  { id: 'u3', name: 'Informática', color: 'blue' },
+  { id: 'u4', name: 'Metas', color: 'amber' },
 ];
 
 export const COLOR_OPTIONS: Unit['color'][] = ['blue', 'red', 'purple', 'green', 'amber', 'slate', 'rose', 'indigo'];
@@ -24,11 +23,11 @@ export const INITIAL_EVENTS: TribunalEvent[] = [
   },
   {
     id: '2',
-    title: 'Revisión de Expediente 445/2023',
-    description: 'Plazo límite para dictar sentencia.',
+    title: 'Mantenimiento de Servidores',
+    description: 'Revisión periódica de infraestructura.',
     startTime: new Date(new Date().setHours(11, 0, 0, 0)),
     endTime: new Date(new Date().setHours(12, 0, 0, 0)),
-    unitId: 'u2',
+    unitId: 'u3',
     type: 'tarea',
     status: 'pendiente'
   }

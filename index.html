@@ -34,12 +34,10 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-slate-50 text-slate-900">
   <div id="root"></div>
-  <!-- Carga explícita del punto de entrada de la aplicación -->
-  <script type="module" src="./index.tsx"></script>
-<script type="module" src="/index.tsx"></script>
+  <!-- Carga explícita del punto de entrada usando ruta absoluta para evitar problemas de resolución en Vercel -->
+  <script type="module" src="/index.tsx"></script>
 </body>
 </html>
