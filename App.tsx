@@ -79,14 +79,13 @@ const App: React.FC = () => {
 
   const fetchOrCreateProfile = async (userId: string, email: string | undefined, fullName: string | undefined) => {
     try {
-      // 1. Intentar buscar por ID (usuario ya registrado antes)
-      let { data: profileData, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      // 1. Intentar buscar por ID
+      let { data: profileData, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       
-      // 2. Si no hay por ID, buscar por EMAIL (invitación previa de Gerson)
-      if (error && email) {
-        const { data: inviteData } = await supabase.from('profiles').select('*').eq('email', email.toLowerCase().trim()).single();
+      // 2. Si no hay por ID, buscar por EMAIL (invitación previa)
+      if (!profileData && email) {
+        const { data: inviteData } = await supabase.from('profiles').select('*').eq('email', email.toLowerCase().trim()).maybeSingle();
         if (inviteData) {
-          // Vincular la invitación con el nuevo ID de Auth
           const { data: updatedProfile } = await supabase.from('profiles').update({ id: userId }).eq('email', email.toLowerCase().trim()).select().single();
           if (updatedProfile) {
             setProfile(updatedProfile);
@@ -95,8 +94,8 @@ const App: React.FC = () => {
         }
       }
 
-      // 3. Si no existe de ninguna forma, crear nuevo
-      if (error && (error.code === 'PGRST116' || error.message.includes('No rows found'))) {
+      // 3. Crear nuevo si no existe
+      if (!profileData) {
         const isUserGerson = checkIsAdmin(email);
         const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
           id: userId,
@@ -104,11 +103,11 @@ const App: React.FC = () => {
           email: email?.toLowerCase().trim(),
           role: isUserGerson ? 'Administrador de Sistemas' : 'Funcionario Judicial',
           is_approved: isUserGerson
-        }).select().single();
+        }).select().maybeSingle();
         
         if (createError) console.error("Error creating profile:", createError);
         if (newProfile) setProfile(newProfile);
-      } else if (profileData) {
+      } else {
         setProfile(profileData);
       }
     } catch (err) { 
