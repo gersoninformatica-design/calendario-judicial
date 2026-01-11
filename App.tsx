@@ -97,9 +97,8 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Definimos isAdmin basado en el correo de la SESIÓN, no del perfil
+    // Bypass Gerson
     const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
-    
     if (!session || !profile || (!profile.is_approved && !isAdmin)) return;
 
     const channel = supabase.channel('tribunal-realtime', {
@@ -226,7 +225,6 @@ const App: React.FC = () => {
 
   if (!session) return <AuthModal />;
 
-  // BYPASS PARA GERSON USANDO EL EMAIL DE LA SESIÓN
   const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
   if (profile && !profile.is_approved && !isAdmin) {
     return (
@@ -349,7 +347,7 @@ const App: React.FC = () => {
         </div>
 
         {isModalOpen && <EventModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveEvent} onDelete={handleDeleteEvent} units={units} initialDate={selectedDate} initialEvent={selectedEvent} />}
-        {isUnitModalOpen && <UnitSettingsModal isOpen={isUnitModalOpen} onClose={() => setIsUnitModalOpen(false)} units={units} events={events} onUpdateUnits={setUnits} userProfile={profile} onImportData={() => {}} />}
+        {isUnitModalOpen && <UnitSettingsModal isOpen={isUnitModalOpen} onClose={() => setIsUnitModalOpen(false)} units={units} events={events} onUpdateUnits={setUnits} userProfile={profile} currentSession={session} onImportData={() => {}} />}
       </main>
     </div>
   );

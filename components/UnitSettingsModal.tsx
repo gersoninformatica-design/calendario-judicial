@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Plus, Trash2, Check, Settings, Download, Upload, Share2, ShieldCheck, UserCheck, UserX, Loader2 } from 'lucide-react';
+import { X, Plus, Trash2, Check, Settings, Download, Upload, Share2, ShieldCheck, UserCheck, UserX, Loader2, RefreshCw } from 'lucide-react';
 import { Unit, TribunalEvent, UserProfile } from '../types.ts';
 import { COLOR_OPTIONS } from '../constants.tsx';
 import { supabase } from '../lib/supabase.ts';
@@ -11,11 +11,12 @@ interface UnitSettingsModalProps {
   units: Unit[];
   events: TribunalEvent[];
   userProfile: UserProfile | null;
+  currentSession: any;
   onUpdateUnits: (units: Unit[]) => void;
   onImportData: (events: TribunalEvent[], units: Unit[]) => void;
 }
 
-const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, events, userProfile, onUpdateUnits, onImportData }) => {
+const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, events, userProfile, currentSession, onUpdateUnits, onImportData }) => {
   const [activeTab, setActiveTab] = useState<'units' | 'users' | 'sync'>('units');
   const [newUnitName, setNewUnitName] = useState('');
   const [selectedColor, setSelectedColor] = useState<Unit['color']>('blue');
@@ -23,19 +24,26 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
   const [loadingUsers, setLoadingUsers] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = userProfile?.email === 'gerson.informatica@gmail.com';
+  // Validación robusta de administrador usando la sesión de Supabase
+  const isAdmin = currentSession?.user?.email === 'gerson.informatica@gmail.com';
 
   useEffect(() => {
     if (activeTab === 'users' && isAdmin) {
       fetchUsers();
     }
-  }, [activeTab]);
+  }, [activeTab, isAdmin]);
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-    if (data) setAllUsers(data);
-    setLoadingUsers(false);
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      if (data) setAllUsers(data);
+    } catch (err) {
+      console.error("Error fetching users:", err);
+    } finally {
+      setLoadingUsers(false);
+    }
   };
 
   const handleApproveUser = async (userId: string, approve: boolean) => {
@@ -95,16 +103,28 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
 
           {activeTab === 'users' && isAdmin && (
             <div className="space-y-4 animate-in fade-in duration-300">
-               <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl mb-6"><div className="flex gap-3"><ShieldCheck className="w-5 h-5 text-amber-600" /><p className="text-[10px] font-bold text-amber-800 uppercase tracking-tight leading-tight">Gerson, como administrador, tienes el poder de autorizar el acceso a la plataforma.</p></div></div>
-               {loadingUsers ? <div className="flex justify-center py-12"><Loader2 className="w-10 h-10 text-blue-500 animate-spin" /></div> : (
+               <div className="flex items-center justify-between bg-amber-50 border border-amber-100 p-4 rounded-2xl mb-6">
+                 <div className="flex gap-3">
+                   <ShieldCheck className="w-5 h-5 text-amber-600" />
+                   <p className="text-[10px] font-bold text-amber-800 uppercase tracking-tight leading-tight">Gerson, autoriza aquí el acceso a los nuevos compañeros.</p>
+                 </div>
+                 <button onClick={fetchUsers} disabled={loadingUsers} className="p-2 text-amber-600 hover:bg-amber-100 rounded-full transition-all">
+                   <RefreshCw className={`w-4 h-4 ${loadingUsers ? 'animate-spin' : ''}`} />
+                 </button>
+               </div>
+               
+               {loadingUsers && allUsers.length === 0 ? <div className="flex justify-center py-12"><Loader2 className="w-10 h-10 text-blue-500 animate-spin" /></div> : (
                  <div className="grid gap-3">
+                   {allUsers.length === 0 && (
+                     <div className="text-center py-10 text-slate-400 font-bold text-xs uppercase tracking-widest">No hay otros usuarios registrados todavía.</div>
+                   )}
                    {allUsers.map(u => (
                      <div key={u.id} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-between group hover:border-blue-200 transition-all">
                         <div className="flex items-center gap-4">
                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-[10px] ${u.is_approved ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{u.full_name?.substring(0,2).toUpperCase()}</div>
                            <div>
                               <p className="text-sm font-black text-slate-800">{u.full_name}</p>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.role} {u.email === userProfile?.email ? '(Tú)' : ''}</p>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.role} {u.id === userProfile?.id ? '(Tú)' : ''}</p>
                            </div>
                         </div>
                         <div className="flex gap-2">
