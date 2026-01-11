@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar.tsx';
 import CalendarGrid from './components/CalendarGrid.tsx';
 import ListView from './components/ListView.tsx';
@@ -8,15 +8,37 @@ import UnitSettingsModal from './components/UnitSettingsModal.tsx';
 import AuthModal from './components/AuthModal.tsx';
 import { TribunalEvent, Unit, UserProfile } from './types.ts';
 import { supabase } from './lib/supabase.ts';
-import { FileText, BarChart3, Sparkles, Loader2, Globe, Wifi, WifiOff, Users, ShieldCheck, UserCircle } from 'lucide-react';
+// Fix: Import missing 'format' function from date-fns
+import { format } from 'date-fns';
+import { 
+  FileText, 
+  BarChart3, 
+  Sparkles, 
+  Loader2, 
+  Users, 
+  ShieldCheck, 
+  Activity,
+  History,
+  Bell,
+  Clock
+} from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
+
+interface ActivityItem {
+  id: string;
+  userName: string;
+  action: 'creó' | 'actualizó' | 'eliminó';
+  target: string;
+  timestamp: Date;
+}
 
 const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
   
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
@@ -71,31 +93,18 @@ const App: React.FC = () => {
     if (!session || !profile) return;
 
     const channel = supabase.channel('despacho-presencia', {
-      config: {
-        presence: {
-          key: session.user.id,
-        },
-      },
+      config: { presence: { key: session.user.id } },
     });
 
     channel
       .on('presence', { event: 'sync' }, () => {
         const newState = channel.presenceState();
-        // Mapear los estados de presencia a una lista plana de usuarios
         const users = Object.values(newState).flat().map((p: any) => p);
-        // Filtrar duplicados por ID si el mismo usuario tiene varias pestañas
         const uniqueUsers = Array.from(new Map(users.map(u => [u.id, u])).values());
         setOnlineUsers(uniqueUsers);
       })
-      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-        console.log('Usuario se unió:', key, newPresences);
-      })
-      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-        console.log('Usuario salió:', key, leftPresences);
-      })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // Publicar mi propio perfil a los demás
           await channel.track({
             id: profile.id,
             full_name: profile.full_name,
@@ -104,12 +113,10 @@ const App: React.FC = () => {
         }
       });
 
-    return () => {
-      channel.unsubscribe();
-    };
+    return () => { channel.unsubscribe(); };
   }, [session, profile]);
 
-  // 3. CARGA DE DATOS
+  // 3. CARGA DE DATOS Y FEED DE ACTIVIDAD
   useEffect(() => {
     if (!session) {
       setIsLoaded(true);
@@ -138,15 +145,34 @@ const App: React.FC = () => {
 
     const channel = supabase.channel('db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, async (payload) => {
+        let actionLabel: 'creó' | 'actualizó' | 'eliminó' = 'actualizó';
+        let targetTitle = '';
+        
         if (payload.eventType === 'INSERT') {
+          actionLabel = 'creó';
+          targetTitle = payload.new.title;
           const newE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
           setEvents(prev => [...prev.filter(e => e.id !== newE.id), newE]);
         } else if (payload.eventType === 'UPDATE') {
+          actionLabel = 'actualizó';
+          targetTitle = payload.new.title;
           const updE = { ...payload.new, startTime: new Date(payload.new.startTime), endTime: new Date(payload.new.endTime) } as TribunalEvent;
           setEvents(prev => prev.map(e => e.id === updE.id ? updE : e));
         } else if (payload.eventType === 'DELETE') {
+          actionLabel = 'eliminó';
+          targetTitle = payload.old.title || 'Evento';
           setEvents(prev => prev.filter(e => e.id !== payload.old.id));
         }
+
+        // Agregar al feed de actividades localmente
+        const newActivity: ActivityItem = {
+          id: crypto.randomUUID(),
+          userName: 'Alguien', // En un sistema real, haríamos un join con perfiles
+          action: actionLabel,
+          target: targetTitle,
+          timestamp: new Date()
+        };
+        setActivities(prev => [newActivity, ...prev].slice(0, 10));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'units' }, (payload) => {
         if (payload.eventType === 'INSERT') setUnits(prev => [...prev, payload.new as Unit]);
@@ -176,26 +202,11 @@ const App: React.FC = () => {
 
   const handleSaveEvent = async (eventData: Omit<TribunalEvent, 'id'>) => {
     if (!session) return;
-    
-    const payload = {
-      ...eventData,
-      startTime: eventData.startTime.toISOString(),
-      endTime: eventData.endTime.toISOString(),
-      user_id: session.user.id
-    };
-
+    const payload = { ...eventData, startTime: eventData.startTime.toISOString(), endTime: eventData.endTime.toISOString(), user_id: session.user.id };
     try {
-      if (selectedEvent) {
-        await supabase.from('events').update(payload).eq('id', selectedEvent.id);
-      } else {
-        await supabase.from('events').insert({
-          ...payload,
-          id: crypto.randomUUID(),
-        });
-      }
-    } catch (err) {
-      console.error("Error saving event:", err);
-    }
+      if (selectedEvent) await supabase.from('events').update(payload).eq('id', selectedEvent.id);
+      else await supabase.from('events').insert({ ...payload, id: crypto.randomUUID() });
+    } catch (err) { console.error(err); }
   };
 
   const handleDeleteEvent = async (id: string) => {
@@ -203,23 +214,14 @@ const App: React.FC = () => {
     setIsModalOpen(false);
   };
 
-  const handleUpdateUnits = async (newUnits: Unit[]) => {
-    setUnits(newUnits); 
-  };
-
   const handleMoveEvent = async (eventId: string, targetDate: Date) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return;
-
     const duration = event.endTime.getTime() - event.startTime.getTime();
     const newStart = new Date(targetDate);
     newStart.setHours(event.startTime.getHours(), event.startTime.getMinutes());
     const newEnd = new Date(newStart.getTime() + duration);
-
-    await supabase.from('events').update({
-      startTime: newStart.toISOString(),
-      endTime: newEnd.toISOString()
-    }).eq('id', eventId);
+    await supabase.from('events').update({ startTime: newStart.toISOString(), endTime: newEnd.toISOString() }).eq('id', eventId);
   };
 
   if (!isLoaded) return (
@@ -297,60 +299,75 @@ const App: React.FC = () => {
                 events={filteredEvents}
                 units={units}
                 onEditEvent={(event) => { setSelectedEvent(event); setIsModalOpen(true); }}
-                onToggleStatus={(event) => handleSaveEvent({
-                  ...event,
-                  status: event.status === 'completado' ? 'pendiente' : 'completado'
-                })}
+                onToggleStatus={(event) => handleSaveEvent({ ...event, status: event.status === 'completado' ? 'pendiente' : 'completado' })}
               />
             )}
           </div>
 
-          <div className="w-80 flex flex-col gap-6 h-full overflow-y-auto no-scrollbar shrink-0">
-            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/50">
-              <h4 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Users className="w-5 h-5 text-blue-600" />
-                Despacho Activo
+          <aside className="w-80 flex flex-col gap-6 h-full overflow-y-auto no-scrollbar shrink-0">
+            {/* Personal en Línea */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40">
+              <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center justify-between uppercase tracking-widest">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  Personal Online
+                </div>
+                <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-[10px]">{onlineUsers.length}</span>
               </h4>
-              <p className="text-[10px] text-slate-400 mb-4 font-bold uppercase tracking-tight">Personal en Línea ({onlineUsers.length})</p>
-              
-              <div className="space-y-3 max-h-[300px] overflow-y-auto no-scrollbar">
-                {onlineUsers.length === 0 ? (
-                  <div className="text-center py-4 border-2 border-dashed border-slate-100 rounded-2xl">
-                    <Loader2 className="w-4 h-4 animate-spin mx-auto text-slate-300" />
-                    <p className="text-[9px] text-slate-400 mt-2">Sincronizando presencia...</p>
+              <div className="space-y-3">
+                {onlineUsers.map((u) => (
+                  <div key={u.id} className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-100 rounded-2xl transition-all hover:translate-x-1">
+                    <div className="relative">
+                      <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-black">
+                        {u.full_name?.substring(0, 2).toUpperCase() || '??'}
+                      </div>
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-black text-slate-900 truncate">{u.full_name} {u.id === profile?.id ? '(Tú)' : ''}</p>
+                      <p className="text-[9px] text-blue-600 font-bold uppercase">{u.role}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Muro de Novedades (Feed) */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40 flex-1 flex flex-col min-h-[300px]">
+              <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest">
+                <Activity className="w-4 h-4 text-amber-500" />
+                Muro Judicial
+              </h4>
+              <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar">
+                {activities.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-300">
+                    <History className="w-10 h-10 mb-2 opacity-20" />
+                    <p className="text-[10px] font-black uppercase tracking-widest">Sin cambios hoy</p>
                   </div>
                 ) : (
-                  onlineUsers.map((u) => (
-                    <div key={u.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-2xl shadow-sm transition-all hover:scale-[1.02]">
-                      <div className="relative">
-                        <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-black shadow-md">
-                          {u.full_name?.substring(0, 2).toUpperCase() || '??'}
-                        </div>
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-black text-slate-900 truncate">
-                          {u.full_name} {u.id === profile?.id ? '(Tú)' : ''}
+                  activities.map((act) => (
+                    <div key={act.id} className="relative pl-6 pb-4 group">
+                      <div className="absolute left-0 top-1 w-2 h-2 rounded-full bg-slate-200 group-last:bg-transparent before:content-[''] before:absolute before:left-[3px] before:top-2 before:w-[2px] before:h-full before:bg-slate-100 last:before:hidden" />
+                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 group-hover:border-amber-200 group-hover:bg-amber-50 transition-all">
+                        <p className="text-[10px] text-slate-500 leading-tight">
+                          <span className="font-black text-slate-800">{act.userName}</span> {act.action}
                         </p>
-                        <p className="text-[9px] text-blue-600 font-black uppercase tracking-wider">{u.role || 'Funcionario'}</p>
+                        <p className="text-[11px] font-bold text-slate-700 truncate mt-0.5">"{act.target}"</p>
+                        <p className="text-[8px] text-slate-400 font-black uppercase mt-1 flex items-center gap-1">
+                          <Clock className="w-2.5 h-2.5" />
+                          {format(act.timestamp, 'HH:mm')}
+                        </p>
                       </div>
                     </div>
                   ))
                 )}
               </div>
-              
-              <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
-                <p className="text-[9px] text-blue-800 leading-tight">
-                  <span className="font-bold">Info:</span> Los usuarios aparecen aquí automáticamente al abrir el sistema.
-                </p>
-              </div>
             </div>
 
+            {/* Gemini Judicial */}
             <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-3xl p-6 shadow-xl shadow-indigo-200 text-white">
               <div className="flex items-center gap-2 mb-4">
-                <div className="bg-white/20 p-2 rounded-xl backdrop-blur-md">
-                  <Sparkles className="w-5 h-5" />
-                </div>
+                <div className="bg-white/20 p-2 rounded-xl backdrop-blur-md"><Sparkles className="w-5 h-5" /></div>
                 <h4 className="font-bold text-lg tracking-tight">Gemini Judicial</h4>
               </div>
               <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 min-h-[100px] border border-white/10">
@@ -365,7 +382,7 @@ const App: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
+          </aside>
         </div>
 
         {isModalOpen && (
@@ -386,7 +403,7 @@ const App: React.FC = () => {
             onClose={() => setIsUnitModalOpen(false)}
             units={units}
             events={events}
-            onUpdateUnits={handleUpdateUnits}
+            onUpdateUnits={setUnits}
             onImportData={() => {}} 
           />
         )}
