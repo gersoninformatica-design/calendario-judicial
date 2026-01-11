@@ -1,19 +1,22 @@
 
-import React, { useState } from 'react';
-import { X, Plus, Trash2, Check, Settings, AlertCircle } from 'lucide-react';
-import { Unit } from '../types.ts';
+import React, { useState, useRef } from 'react';
+import { X, Plus, Trash2, Check, Settings, Download, Upload, Share2 } from 'lucide-react';
+import { Unit, TribunalEvent } from '../types.ts';
 import { COLOR_OPTIONS } from '../constants.tsx';
 
 interface UnitSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   units: Unit[];
+  events: TribunalEvent[];
   onUpdateUnits: (units: Unit[]) => void;
+  onImportData: (events: TribunalEvent[], units: Unit[]) => void;
 }
 
-const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, onUpdateUnits }) => {
+const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, events, onUpdateUnits, onImportData }) => {
   const [newUnitName, setNewUnitName] = useState('');
   const [selectedColor, setSelectedColor] = useState<Unit['color']>('blue');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -47,6 +50,54 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
     onUpdateUnits(units.map(u => u.id === id ? { ...u, color } : u));
   };
 
+  const handleExportAll = () => {
+    const data = {
+      units,
+      events,
+      exportDate: new Date().toISOString(),
+      app: 'TribunalSync'
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Sincronizacion_Tribunal_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.units && data.events && data.app === 'TribunalSync') {
+          const hydratedEvents = data.events.map((ev: any) => ({
+            ...ev,
+            startTime: new Date(ev.startTime),
+            endTime: new Date(ev.endTime)
+          }));
+          if (confirm('¿Deseas importar estos datos? Se sobrescribirá tu agenda actual.')) {
+            onImportData(hydratedEvents, data.units);
+          }
+        } else {
+          alert('El archivo no parece ser una copia de seguridad válida de TribunalSync.');
+        }
+      } catch (err) {
+        alert('Error al leer el archivo. Asegúrate de que sea un JSON válido.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset
+  };
+
   const getColorHex = (color: string) => {
     const hexMap: Record<string, string> = {
       blue: '#3b82f6', red: '#ef4444', purple: '#a855f7', 
@@ -65,8 +116,8 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
               <Settings className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-slate-800">Configuración de Unidades</h3>
-              <p className="text-xs text-slate-500">Añade, edita o elimina áreas del tribunal</p>
+              <h3 className="text-xl font-bold text-slate-800">Configuración Avanzada</h3>
+              <p className="text-xs text-slate-500">Gestión de unidades y sincronización externa</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
@@ -75,6 +126,48 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 space-y-8">
+          {/* Sincronización */}
+          <section className="space-y-4">
+            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 px-1">
+              <Share2 className="w-4 h-4 text-blue-600" />
+              Sincronización para Colaboración
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={handleExportAll}
+                className="flex flex-col items-center gap-2 p-4 bg-slate-50 border border-slate-200 rounded-2xl hover:border-blue-400 hover:bg-blue-50 transition-all group"
+              >
+                <div className="bg-white p-2 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                  <Download className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-bold text-slate-700">Exportar Datos</p>
+                  <p className="text-[10px] text-slate-500">Copia para compartir</p>
+                </div>
+              </button>
+              
+              <button 
+                onClick={handleImportClick}
+                className="flex flex-col items-center gap-2 p-4 bg-slate-50 border border-slate-200 rounded-2xl hover:border-indigo-400 hover:bg-indigo-50 transition-all group"
+              >
+                <div className="bg-white p-2 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                  <Upload className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-bold text-slate-700">Importar Datos</p>
+                  <p className="text-[10px] text-slate-500">Cargar de otro PC</p>
+                </div>
+              </button>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="hidden" 
+                accept=".json"
+              />
+            </div>
+          </section>
+
           <section className="space-y-4">
             <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 px-1">
               <Plus className="w-4 h-4 text-blue-600" />

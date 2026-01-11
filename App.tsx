@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Sidebar from './components/Sidebar.tsx';
 import CalendarGrid from './components/CalendarGrid.tsx';
 import ListView from './components/ListView.tsx';
@@ -7,25 +7,85 @@ import EventModal from './components/EventModal.tsx';
 import UnitSettingsModal from './components/UnitSettingsModal.tsx';
 import { TribunalEvent, Unit } from './types.ts';
 import { INITIAL_EVENTS, INITIAL_UNITS } from './constants.tsx';
-import { FileText, BarChart3, Sparkles, Loader2 } from 'lucide-react';
+import { FileText, BarChart3, Sparkles, Loader2, CloudCheck } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
 import { setYear, setMonth, setDate } from 'date-fns';
 
+const STORAGE_KEY_EVENTS = 'tribunalsync_events_v1';
+const STORAGE_KEY_UNITS = 'tribunalsync_units_v1';
+
 const App: React.FC = () => {
+  // Estado de carga inicial
+  const [isLoaded, setIsLoaded] = useState(false);
+  
+  // Datos principales
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
-  const [events, setEvents] = useState<TribunalEvent[]>(INITIAL_EVENTS);
-  const [units, setUnits] = useState<Unit[]>(INITIAL_UNITS);
+  const [events, setEvents] = useState<TribunalEvent[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
   
+  // UI Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedEvent, setSelectedEvent] = useState<TribunalEvent | undefined>(undefined);
   
+  // AI
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'saved' | 'saving'>('saved');
+
+  // EFECTO 1: Carga inicial desde LocalStorage
+  useEffect(() => {
+    const savedEvents = localStorage.getItem(STORAGE_KEY_EVENTS);
+    const savedUnits = localStorage.getItem(STORAGE_KEY_UNITS);
+
+    if (savedEvents) {
+      try {
+        const parsedEvents = JSON.parse(savedEvents);
+        // Convertir strings de fecha de vuelta a objetos Date
+        const hydratedEvents = parsedEvents.map((e: any) => ({
+          ...e,
+          startTime: new Date(e.startTime),
+          endTime: new Date(e.endTime)
+        }));
+        setEvents(hydratedEvents);
+      } catch (e) {
+        console.error("Error cargando eventos:", e);
+        setEvents(INITIAL_EVENTS);
+      }
+    } else {
+      setEvents(INITIAL_EVENTS);
+    }
+
+    if (savedUnits) {
+      try {
+        setUnits(JSON.parse(savedUnits));
+      } catch (e) {
+        setUnits(INITIAL_UNITS);
+      }
+    } else {
+      setUnits(INITIAL_UNITS);
+    }
+    
+    setIsLoaded(true);
+  }, []);
+
+  // EFECTO 2: Guardado automático cuando cambian los datos
+  useEffect(() => {
+    if (!isLoaded) return;
+    
+    setSyncStatus('saving');
+    const timer = setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY_EVENTS, JSON.stringify(events));
+      localStorage.setItem(STORAGE_KEY_UNITS, JSON.stringify(units));
+      setSyncStatus('saved');
+    }, 500); // Debounce para no saturar el storage
+
+    return () => clearTimeout(timer);
+  }, [events, units, isLoaded]);
 
   const filteredEvents = useMemo(() => {
     let base = events;
@@ -96,6 +156,12 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleImportData = (importedEvents: TribunalEvent[], importedUnits: Unit[]) => {
+    setEvents(importedEvents);
+    setUnits(importedUnits);
+    alert('Sincronización manual completada con éxito.');
+  };
+
   const runAIAnalysis = async () => {
     setIsAnalyzing(true);
     const result = await analyzeSchedule(eventsWithUnit);
@@ -112,6 +178,13 @@ const App: React.FC = () => {
     }
   };
 
+  if (!isLoaded) return (
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50">
+      <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
+      <p className="text-slate-500 font-medium animate-pulse">Iniciando TribunalSync...</p>
+    </div>
+  );
+
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-900 overflow-hidden font-inter">
       <Sidebar 
@@ -124,36 +197,47 @@ const App: React.FC = () => {
       />
 
       <main className="flex-1 flex flex-col p-8 h-screen overflow-y-auto">
-        <div className="flex justify-end gap-3 mb-8">
-          <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex justify-between items-center mb-8">
+          <div className="flex items-center gap-2">
+             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
+               syncStatus === 'saved' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600 animate-pulse'
+             }`}>
+               {syncStatus === 'saved' ? <CloudCheck className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+               {syncStatus === 'saved' ? 'Sincronizado' : 'Guardando...'}
+             </div>
+          </div>
+          
+          <div className="flex gap-3">
+            <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
+              <button 
+                onClick={() => exportToPDF(eventsWithUnit)}
+                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
+              >
+                <FileText className="w-4 h-4 text-red-500" />
+                Exportar PDF
+              </button>
+              <div className="w-[1px] bg-slate-200 my-1 mx-1" />
+              <button 
+                onClick={() => exportToExcel(eventsWithUnit)}
+                className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
+              >
+                <BarChart3 className="w-4 h-4 text-green-500" />
+                Exportar Excel
+              </button>
+            </div>
             <button 
-              onClick={() => exportToPDF(eventsWithUnit)}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
+              onClick={runAIAnalysis}
+              disabled={isAnalyzing}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-bold rounded-2xl shadow-lg shadow-blue-200 hover:shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
             >
-              <FileText className="w-4 h-4 text-red-500" />
-              Exportar PDF
-            </button>
-            <div className="w-[1px] bg-slate-200 my-1 mx-1" />
-            <button 
-              onClick={() => exportToExcel(eventsWithUnit)}
-              className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-all"
-            >
-              <BarChart3 className="w-4 h-4 text-green-500" />
-              Exportar Excel
+              {isAnalyzing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              Asistente IA
             </button>
           </div>
-          <button 
-            onClick={runAIAnalysis}
-            disabled={isAnalyzing}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-sm font-bold rounded-2xl shadow-lg shadow-blue-200 hover:shadow-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {isAnalyzing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4" />
-            )}
-            Asistente IA
-          </button>
         </div>
 
         <div className="flex gap-8 flex-1 min-h-0">
@@ -250,7 +334,9 @@ const App: React.FC = () => {
             isOpen={isUnitModalOpen}
             onClose={() => setIsUnitModalOpen(false)}
             units={units}
+            events={events}
             onUpdateUnits={handleUpdateUnits}
+            onImportData={handleImportData}
           />
         )}
       </main>
