@@ -7,15 +7,16 @@ import {
   Clock, 
   ChevronRight, 
   Settings,
-  Plus
+  Plus,
+  Users
 } from 'lucide-react';
 import { Unit } from '../types.ts';
 
 interface SidebarProps {
   units: Unit[];
   activeUnitId: string | null;
-  activeView: 'calendar' | 'tasks' | 'reminders';
-  onSelectView: (view: 'calendar' | 'tasks' | 'reminders') => void;
+  activeView: 'calendar' | 'tasks' | 'reminders' | 'reunions';
+  onSelectView: (view: 'calendar' | 'tasks' | 'reminders' | 'reunions') => void;
   onSelectUnit: (unitId: string | null) => void;
   onManageUnits: () => void;
 }
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ units, activeUnitId, activeView, onSe
     { icon: <Calendar className="w-5 h-5" />, label: 'Calendario', id: 'calendar' },
     { icon: <CheckSquare className="w-5 h-5" />, label: 'Tareas', id: 'tasks' },
     { icon: <Clock className="w-5 h-5" />, label: 'Recordatorios', id: 'reminders' },
+    { icon: <Users className="w-5 h-5" />, label: 'Reuniones', id: 'reunions' },
   ] as const;
 
   const getColorClass = (color: string) => {

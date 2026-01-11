@@ -14,7 +14,7 @@ import { setYear, setMonth, setDate } from 'date-fns';
 
 const App: React.FC = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders'>('calendar');
+  const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
   const [events, setEvents] = useState<TribunalEvent[]>(INITIAL_EVENTS);
   const [units, setUnits] = useState<Unit[]>(INITIAL_UNITS);
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
@@ -33,6 +33,7 @@ const App: React.FC = () => {
     
     if (activeView === 'tasks') return base.filter(e => e.type === 'tarea');
     if (activeView === 'reminders') return base.filter(e => e.type === 'recordatorio');
+    if (activeView === 'reunions') return base.filter(e => e.type === 'reunion');
     
     return base;
   }, [events, activeUnitId, activeView]);
@@ -102,6 +103,15 @@ const App: React.FC = () => {
     setIsAnalyzing(false);
   };
 
+  const getListViewTitle = () => {
+    switch (activeView) {
+      case 'tasks': return 'Tareas Judiciales';
+      case 'reminders': return 'Recordatorios y Alertas';
+      case 'reunions': return 'Reuniones y Sesiones';
+      default: return '';
+    }
+  };
+
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-900 overflow-hidden font-inter">
       <Sidebar 
@@ -160,7 +170,7 @@ const App: React.FC = () => {
               />
             ) : (
               <ListView 
-                title={activeView === 'tasks' ? 'Tareas Judiciales' : 'Recordatorios y Alertas'}
+                title={getListViewTitle()}
                 events={filteredEvents}
                 units={units}
                 onEditEvent={handleOpenEditModal}
