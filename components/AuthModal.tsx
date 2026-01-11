@@ -19,21 +19,33 @@ const AuthModal: React.FC = () => {
 
     try {
       if (isRegister) {
-        // Al registrar, creamos el perfil con is_approved = false
-        // y guardamos el email explícitamente para que Gerson lo vea
+        // 1. Registrar el usuario en Auth
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: { 
             data: { 
               full_name: fullName,
-              is_approved: false,
-              email: email
             },
             emailRedirectTo: window.location.origin 
           }
         });
+        
         if (signUpError) throw signUpError;
+
+        // 2. Crear inmediatamente el perfil en la tabla pública para que Gerson lo vea
+        // Incluso si el correo no está verificado, ya lo tendremos en la lista de perfiles
+        if (data?.user) {
+          const { error: profileError } = await supabase.from('profiles').upsert({
+            id: data.user.id,
+            full_name: fullName,
+            email: email,
+            is_approved: false,
+            role: 'Funcionario Judicial'
+          });
+          if (profileError) console.error("Error al crear perfil preventivo:", profileError);
+        }
+
         setMailSent(true);
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
