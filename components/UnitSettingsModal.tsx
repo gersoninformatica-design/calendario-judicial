@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Plus, Trash2, Check, Settings, Download, Upload, Share2, ShieldCheck, UserCheck, UserX, Loader2, RefreshCw } from 'lucide-react';
+import { X, Plus, Trash2, Settings, Download, Upload, ShieldCheck, UserCheck, UserX, Loader2, RefreshCw } from 'lucide-react';
 import { Unit, TribunalEvent, UserProfile } from '../types.ts';
 import { COLOR_OPTIONS } from '../constants.tsx';
 import { supabase } from '../lib/supabase.ts';
@@ -14,24 +14,30 @@ interface UnitSettingsModalProps {
   currentSession: any;
   onUpdateUnits: (units: Unit[]) => void;
   onImportData: (events: TribunalEvent[], units: Unit[]) => void;
+  initialTab?: 'units' | 'users' | 'sync';
 }
 
-const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, events, userProfile, currentSession, onUpdateUnits, onImportData }) => {
-  const [activeTab, setActiveTab] = useState<'units' | 'users' | 'sync'>('units');
+const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, units, events, userProfile, currentSession, onUpdateUnits, onImportData, initialTab = 'units' }) => {
+  const [activeTab, setActiveTab] = useState<'units' | 'users' | 'sync'>(initialTab);
   const [newUnitName, setNewUnitName] = useState('');
   const [selectedColor, setSelectedColor] = useState<Unit['color']>('blue');
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Validación robusta de administrador usando la sesión de Supabase
-  const isAdmin = currentSession?.user?.email === 'gerson.informatica@gmail.com';
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, isOpen]);
+
+  // Validación de administrador Maestro
+  const ADMIN_EMAIL = 'gerson.informatica@gmail.com';
+  const isAdmin = currentSession?.user?.email?.toLowerCase().trim() === ADMIN_EMAIL;
 
   useEffect(() => {
-    if (activeTab === 'users' && isAdmin) {
+    if (activeTab === 'users' && isAdmin && isOpen) {
       fetchUsers();
     }
-  }, [activeTab, isAdmin]);
+  }, [activeTab, isAdmin, isOpen]);
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
@@ -71,12 +77,15 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
         <div className="flex items-center justify-between p-8 border-b border-slate-100">
           <div className="flex items-center gap-3">
             <div className="bg-blue-600 p-2.5 rounded-2xl text-white shadow-lg shadow-blue-100"><Settings className="w-6 h-6" /></div>
-            <div><h3 className="text-xl font-black text-slate-800 tracking-tight">Consola de Control</h3><p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Gestión Centralizada del Tribunal</p></div>
+            <div>
+              <h3 className="text-xl font-black text-slate-800 tracking-tight">Consola de Control</h3>
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Gestión Centralizada del Tribunal</p>
+            </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
         </div>
 
-        <div className="flex bg-slate-50 p-2 m-8 rounded-2xl border border-slate-100">
+        <div className="flex bg-slate-50 p-2 m-8 rounded-2xl border border-slate-100 shrink-0">
            <button onClick={() => setActiveTab('units')} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${activeTab === 'units' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Unidades</button>
            {isAdmin && (
              <button onClick={() => setActiveTab('users')} className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${activeTab === 'users' ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-400'}`}>Seguridad Usuarios</button>
@@ -115,31 +124,32 @@ const UnitSettingsModal: React.FC<UnitSettingsModalProps> = ({ isOpen, onClose, 
                
                {loadingUsers && allUsers.length === 0 ? <div className="flex justify-center py-12"><Loader2 className="w-10 h-10 text-blue-500 animate-spin" /></div> : (
                  <div className="grid gap-3">
-                   {allUsers.length === 0 && (
-                     <div className="text-center py-10 text-slate-400 font-bold text-xs uppercase tracking-widest">No hay otros usuarios registrados todavía.</div>
+                   {allUsers.length === 0 ? (
+                     <div className="text-center py-10 text-slate-400 font-bold text-xs uppercase tracking-widest">No hay otros funcionarios registrados.</div>
+                   ) : (
+                     allUsers.map(u => (
+                       <div key={u.id} className={`bg-white border p-4 rounded-2xl flex items-center justify-between group transition-all ${u.is_approved ? 'border-slate-100' : 'border-amber-200 bg-amber-50/20'}`}>
+                          <div className="flex items-center gap-4">
+                             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-[10px] ${u.is_approved ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{u.full_name?.substring(0,2).toUpperCase()}</div>
+                             <div>
+                                <p className="text-sm font-black text-slate-800">{u.full_name}</p>
+                                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{u.email || 'Sin Correo'}</p>
+                             </div>
+                          </div>
+                          <div className="flex gap-2">
+                             {u.email?.toLowerCase().trim() !== ADMIN_EMAIL && (
+                               <>
+                                 {u.is_approved ? (
+                                   <button onClick={() => handleApproveUser(u.id, false)} className="p-3 text-red-400 hover:bg-red-50 rounded-xl transition-all" title="Quitar Acceso"><UserX className="w-5 h-5" /></button>
+                                 ) : (
+                                   <button onClick={() => handleApproveUser(u.id, true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md hover:bg-green-700 transition-all"><UserCheck className="w-4 h-4" /> Aprobar</button>
+                                 )}
+                               </>
+                             )}
+                          </div>
+                       </div>
+                     ))
                    )}
-                   {allUsers.map(u => (
-                     <div key={u.id} className="bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-between group hover:border-blue-200 transition-all">
-                        <div className="flex items-center gap-4">
-                           <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-[10px] ${u.is_approved ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{u.full_name?.substring(0,2).toUpperCase()}</div>
-                           <div>
-                              <p className="text-sm font-black text-slate-800">{u.full_name}</p>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{u.role} {u.id === userProfile?.id ? '(Tú)' : ''}</p>
-                           </div>
-                        </div>
-                        <div className="flex gap-2">
-                           {u.id !== userProfile?.id && (
-                             <>
-                               {u.is_approved ? (
-                                 <button onClick={() => handleApproveUser(u.id, false)} className="p-3 text-red-400 hover:bg-red-50 rounded-xl transition-all" title="Bloquear Acceso"><UserX className="w-5 h-5" /></button>
-                               ) : (
-                                 <button onClick={() => handleApproveUser(u.id, true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md hover:bg-green-700 transition-all"><UserCheck className="w-4 h-4" /> Aprobar</button>
-                               )}
-                             </>
-                           )}
-                        </div>
-                     </div>
-                   ))}
                  </div>
                )}
             </div>

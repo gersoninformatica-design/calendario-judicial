@@ -16,15 +16,10 @@ import {
   Loader2, 
   Users, 
   ShieldCheck, 
-  Activity,
-  History,
-  Clock,
-  AlertTriangle,
-  CheckCircle,
-  Trash2,
-  Lock,
-  UserPlus,
-  ShieldAlert
+  Activity, 
+  History, 
+  Clock, 
+  ShieldAlert 
 } from 'lucide-react';
 import { analyzeSchedule } from './services/geminiService.ts';
 import { exportToPDF, exportToExcel } from './utils/exportUtils.ts';
@@ -38,41 +33,41 @@ interface ActivityItem {
 }
 
 const App: React.FC = () => {
-  // 1. DECLARACIÓN DE ESTADOS
   const [isLoaded, setIsLoaded] = useState(false);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
-  
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeView, setActiveView] = useState<'calendar' | 'tasks' | 'reminders' | 'reunions'>('calendar');
   const [events, setEvents] = useState<TribunalEvent[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
-  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [unitModalInitialTab, setUnitModalInitialTab] = useState<'units' | 'users' | 'sync'>('units');
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedEvent, setSelectedEvent] = useState<TribunalEvent | undefined>(undefined);
-  
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // 2. REFS
   const broadcastChannel = useRef<any>(null);
 
-  // 3. EFECTOS
+  // Validación Maestra de Gerson (Case Insensitive)
+  const ADMIN_EMAIL = 'gerson.informatica@gmail.com';
+  const checkIsAdmin = (email?: string) => email?.toLowerCase().trim() === ADMIN_EMAIL;
+  const isAdmin = useMemo(() => checkIsAdmin(session?.user?.email), [session]);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchProfile(session.user.id);
+      if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) fetchProfile(session.user.id);
+      if (session) fetchOrCreateProfile(session.user.id, session.user.email, session.user.user_metadata?.full_name);
       else {
         setProfile(null);
         setEvents([]);
@@ -83,30 +78,33 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId: string, retries = 3) => {
+  const fetchOrCreateProfile = async (userId: string, email: string | undefined, fullName: string | undefined) => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (error && retries > 0) {
-        setTimeout(() => fetchProfile(userId, retries - 1), 1000);
+      if (error && (error.code === 'PGRST116' || error.message.includes('No rows found'))) {
+        const isUserGerson = checkIsAdmin(email);
+        const { data: newProfile, error: createError } = await supabase.from('profiles').insert({
+          id: userId,
+          full_name: fullName || 'Funcionario Judicial',
+          role: isUserGerson ? 'Administrador de Sistemas' : 'Funcionario Judicial',
+          is_approved: isUserGerson,
+          email: email
+        }).select().single();
+        if (createError) console.error(createError);
+        if (newProfile) setProfile(newProfile);
       } else if (data) {
+        if (!data.email && email) {
+          await supabase.from('profiles').update({ email }).eq('id', userId);
+        }
         setProfile(data);
       }
-    } catch (err) {
-      console.error("Error fetching profile:", err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   useEffect(() => {
-    // Bypass Gerson
-    const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
     if (!session || !profile || (!profile.is_approved && !isAdmin)) return;
-
-    const channel = supabase.channel('tribunal-realtime', {
-      config: { presence: { key: session.user.id } },
-    });
-
+    const channel = supabase.channel('tribunal-realtime', { config: { presence: { key: session.user.id } } });
     broadcastChannel.current = channel;
-
     channel
       .on('presence', { event: 'sync' }, () => {
         const newState = channel.presenceState();
@@ -130,24 +128,17 @@ const App: React.FC = () => {
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({
-            id: profile.id,
-            full_name: profile.full_name,
-            role: profile.role || 'Funcionario Judicial'
-          });
+          await channel.track({ id: profile.id, full_name: profile.full_name, role: profile.role || 'Funcionario Judicial' });
         }
       });
-
     return () => { channel.unsubscribe(); };
-  }, [session, profile]);
+  }, [session, profile, isAdmin]);
 
   useEffect(() => {
-    const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
     if (!session || (profile && !profile.is_approved && !isAdmin)) {
       setIsLoaded(true);
       return;
     }
-
     const fetchData = async () => {
       try {
         const { data: unitsData } = await supabase.from('units').select('*').order('name');
@@ -155,35 +146,24 @@ const App: React.FC = () => {
         setUnits(unitsData || []);
         setEvents((eventsData || []).map(e => ({ ...e, startTime: new Date(e.startTime), endTime: new Date(e.endTime) })));
         setIsLoaded(true);
-      } catch (err) {
-        setIsOnline(false);
-        setIsLoaded(true);
-      }
+      } catch (err) { setIsOnline(false); setIsLoaded(true); }
     };
-
     fetchData();
-  }, [session, profile]);
+  }, [session, profile, isAdmin]);
 
-  // 4. MEMOS
   const filteredEvents = useMemo(() => {
     let base = events;
     if (activeUnitId) base = base.filter(e => e.unitId === activeUnitId);
-    
     if (activeView === 'tasks') return base.filter(e => e.type === 'tarea');
     if (activeView === 'reminders') return base.filter(e => e.type === 'recordatorio');
     if (activeView === 'reunions') return base.filter(e => e.type === 'reunion');
-    
     return base;
   }, [events, activeUnitId, activeView]);
 
   const eventsWithUnit = useMemo(() => {
-    return filteredEvents.map(e => ({ 
-      ...e, 
-      unit: units.find(u => u.id === e.unitId)?.name || 'Desconocida' 
-    }));
+    return filteredEvents.map(e => ({ ...e, unit: units.find(u => u.id === e.unitId)?.name || 'Desconocida' }));
   }, [filteredEvents, units]);
 
-  // 5. HANDLERS
   const notifyAction = (action: ActivityItem['action'], target: string) => {
     if (broadcastChannel.current && profile) {
       const payload = { id: crypto.randomUUID(), userName: profile.full_name, action, target, timestamp: new Date() };
@@ -215,7 +195,6 @@ const App: React.FC = () => {
     setIsModalOpen(false);
   };
 
-  // 6. RETORNOS CONDICIONALES
   if (!isLoaded) return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
       <div className="relative"><Loader2 className="w-16 h-16 text-blue-500 animate-spin" /><ShieldCheck className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" /></div>
@@ -225,7 +204,6 @@ const App: React.FC = () => {
 
   if (!session) return <AuthModal />;
 
-  const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
   if (profile && !profile.is_approved && !isAdmin) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
@@ -248,33 +226,31 @@ const App: React.FC = () => {
              </div>
            </div>
            <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Se ha notificado al administrador de tu solicitud</p>
-           <button 
-             onClick={() => supabase.auth.signOut()}
-             className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors"
-           >
-             Cerrar Sesión
-           </button>
+           <button onClick={() => supabase.auth.signOut()} className="mt-8 text-slate-400 font-bold hover:text-red-500 transition-colors">Cerrar Sesión</button>
         </div>
       </div>
     );
   }
 
-  // 7. RENDERIZADO PRINCIPAL
+  const handleOpenUnitModal = (tab: 'units' | 'users' | 'sync' = 'units') => {
+    setUnitModalInitialTab(tab);
+    setIsUnitModalOpen(true);
+  };
+
   return (
     <div className="flex bg-slate-50 min-h-screen text-slate-900 overflow-hidden font-inter">
       <Sidebar 
-        units={units} activeUnitId={activeUnitId} activeView={activeView} user={profile}
+        units={units} activeUnitId={activeUnitId} activeView={activeView} user={{...profile, email: session?.user?.email} as UserProfile}
         onSelectView={setActiveView} onSelectUnit={setActiveUnitId} 
-        onManageUnits={() => setIsUnitModalOpen(true)}
+        onManageUnits={handleOpenUnitModal}
       />
 
       <main className="flex-1 flex flex-col p-8 h-screen overflow-y-auto">
         <div className="flex justify-between items-center mb-8">
           <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${isOnline ? 'bg-green-50 border-green-200 text-green-600 shadow-sm' : 'bg-red-50 border-red-200 text-red-600'}`}>
             <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            {isOnline ? 'Tribunal Cloud: Activo' : 'Sin Conexión'}
+            {isOnline ? (isAdmin ? 'Admin Modo: Gerson' : 'Tribunal Cloud: Activo') : 'Sin Conexión'}
           </div>
-          
           <div className="flex gap-3">
             <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
               <button onClick={() => exportToPDF(eventsWithUnit)} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl transition-colors"><FileText className="w-4 h-4 text-red-500" />PDF</button>
@@ -307,7 +283,6 @@ const App: React.FC = () => {
               <ListView title={activeView === 'tasks' ? 'Tareas Judiciales' : activeView === 'reminders' ? 'Recordatorios' : 'Reuniones'} events={filteredEvents} units={units} onEditEvent={(event) => { setSelectedEvent(event); setIsModalOpen(true); }} onToggleStatus={(event) => handleSaveEvent({ ...event, status: event.status === 'completado' ? 'pendiente' : 'completado' })} />
             )}
           </div>
-
           <aside className="w-80 flex flex-col gap-6 h-full overflow-y-auto no-scrollbar shrink-0">
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40">
               <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center justify-between uppercase tracking-widest">
@@ -323,7 +298,6 @@ const App: React.FC = () => {
                 ))}
               </div>
             </div>
-
             <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xl shadow-slate-200/40 flex-1 flex flex-col min-h-[300px]">
               <h4 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest"><Activity className="w-4 h-4 text-amber-500" />Muro Judicial</h4>
               <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar">
@@ -347,7 +321,7 @@ const App: React.FC = () => {
         </div>
 
         {isModalOpen && <EventModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveEvent} onDelete={handleDeleteEvent} units={units} initialDate={selectedDate} initialEvent={selectedEvent} />}
-        {isUnitModalOpen && <UnitSettingsModal isOpen={isUnitModalOpen} onClose={() => setIsUnitModalOpen(false)} units={units} events={events} onUpdateUnits={setUnits} userProfile={profile} currentSession={session} onImportData={() => {}} />}
+        {isUnitModalOpen && <UnitSettingsModal isOpen={isUnitModalOpen} onClose={() => setIsUnitModalOpen(false)} units={units} events={events} onUpdateUnits={setUnits} userProfile={profile} currentSession={session} onImportData={() => {}} initialTab={unitModalInitialTab} />}
       </main>
     </div>
   );
