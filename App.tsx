@@ -97,8 +97,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Si no hay perfil o es Gerson (bypass), permitir conexión en tiempo real
-    const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+    // Definimos isAdmin basado en el correo de la SESIÓN, no del perfil
+    const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
+    
     if (!session || !profile || (!profile.is_approved && !isAdmin)) return;
 
     const channel = supabase.channel('tribunal-realtime', {
@@ -142,7 +143,7 @@ const App: React.FC = () => {
   }, [session, profile]);
 
   useEffect(() => {
-    const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+    const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
     if (!session || (profile && !profile.is_approved && !isAdmin)) {
       setIsLoaded(true);
       return;
@@ -225,8 +226,8 @@ const App: React.FC = () => {
 
   if (!session) return <AuthModal />;
 
-  // BYPASS PARA GERSON: Si es su email, no mostrar la pantalla de bloqueo
-  const isAdmin = profile?.email === 'gerson.informatica@gmail.com';
+  // BYPASS PARA GERSON USANDO EL EMAIL DE LA SESIÓN
+  const isAdmin = session?.user?.email === 'gerson.informatica@gmail.com';
   if (profile && !profile.is_approved && !isAdmin) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
